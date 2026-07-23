@@ -7,8 +7,11 @@ const {
   deleteSubject,
   getSubjectById,
   updateSubject,
+  getDashboardStats,
 } = require('../controllers/subjectController');
 
+// ── Fixed / specific routes MUST come before parameterized routes (e.g. /:semesterId)
+router.get('/stats/overview', protect, getDashboardStats);
 router.get('/single/:id', protect, getSubjectById);
 router.get('/:semesterId', protect, getSubjects);
 router.post('/', protect, createSubject);

@@ -11,6 +11,22 @@ interface Semester {
   createdAt?: string;
 }
 
+interface WeakSubjectItem {
+  subjectId: string;
+  name: string;
+  weakTopics: string[];
+  latestScore: number;
+}
+
+interface DashboardStats {
+  overallProgress: number;
+  totalStudyTimeMinutes: number;
+  weakSubjects: WeakSubjectItem[];
+  examReadiness: number;
+  totalSubjects: number;
+  totalQuizzesTaken: number;
+}
+
 /* ─── Theme tokens ─────────────────────────────────────────── */
 const semesterThemes = [
   { iconBg: 'linear-gradient(135deg,#0d3d3a 0%,#1a5c5a 100%)', glow: 'rgba(168,212,220,0.25)', iconColor: '#A8D4DC', bar: 'linear-gradient(90deg,#A8D4DC,#4EC9D4)' },
@@ -62,7 +78,7 @@ const CircularProgress = ({
 /* ─── Readiness Ring ─────────────────────────────────────────── */
 const ReadinessRing = ({ value }: { value: number }) => {
   const size = 108, sw = 10, r = (size - sw * 2) / 2, circ = 2 * Math.PI * r, center = size / 2;
-  const pct = value / 100;
+  const pct = Math.min(value / 100, 1);
   return (
     <div className="relative flex items-center justify-center" style={{ width: size, height: size, background: 'transparent' }}>
       <svg width={size} height={size} style={{ transform: 'rotate(-90deg)', filter: 'drop-shadow(0 0 12px rgba(149,155,185,0.55)) drop-shadow(0 0 24px rgba(184,160,232,0.3))', background: 'transparent' }} className="absolute">
@@ -98,6 +114,18 @@ const Dashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [addLoading, setAddLoading] = useState(false);
   const [error, setError] = useState('');
+
+  // Dashboard Stats state
+  const [stats, setStats] = useState<DashboardStats>({
+    overallProgress: 0,
+    totalStudyTimeMinutes: 0,
+    weakSubjects: [],
+    examReadiness: 0,
+    totalSubjects: 0,
+    totalQuizzesTaken: 0,
+  });
+  const [statsLoading, setStatsLoading] = useState(true);
+
   const { user, logoutUser } = useAuth();
 
   useEffect(() => {
@@ -114,6 +142,22 @@ const Dashboard: React.FC = () => {
     fetchSemesters();
   }, []);
 
+  // Fetch Dashboard Overview Stats
+  useEffect(() => {
+    const fetchStats = async () => {
+      try {
+        const res = await API.get('/subjects/stats/overview');
+        setStats(res.data);
+      } catch (err: any) {
+        console.error('Failed to fetch dashboard stats', err);
+      } finally {
+        setStatsLoading(false);
+      }
+    };
+
+    fetchStats();
+  }, []);
+
   const handleAddSemester = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newSemester.trim()) return;
@@ -127,6 +171,14 @@ const Dashboard: React.FC = () => {
     } finally {
       setAddLoading(false);
     }
+  };
+
+  // Helper to format minutes to hours and minutes
+  const formatStudyTime = (minutes: number) => {
+    if (!minutes || minutes <= 0) return { hours: 0, mins: 0 };
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    return { hours, mins };
   };
 
   const semesterCompletion = [72, 68, 55, 20];
@@ -264,7 +316,7 @@ const Dashboard: React.FC = () => {
                 </IconBadge>
                 <span className="text-sm font-semibold" style={{ color: '#A8D4DC' }}>Overall Progress</span>
               </div>
-              <CircularProgress value={72} size={100} strokeWidth={9} gradId="teal-g1" color1="#A8D4DC" color2="#4EC9D4" glowColor="rgba(168,212,220,0.4)" />
+              <CircularProgress value={statsLoading ? 0 : stats.overallProgress} size={100} strokeWidth={9} gradId="teal-g1" color1="#A8D4DC" color2="#4EC9D4" glowColor="rgba(168,212,220,0.4)" />
               <p className="text-xs text-center" style={{ color: '#4a7a68' }}>Across all subjects</p>
             </div>
 
@@ -276,11 +328,19 @@ const Dashboard: React.FC = () => {
                 </IconBadge>
                 <span className="text-sm font-semibold" style={{ color: '#7EC8E3' }}>Total Study Time</span>
               </div>
-              <p className="font-jakarta font-bold" style={{ fontSize: 42, lineHeight: 1, background: 'linear-gradient(90deg, #DAF1DE, #A8D4DC)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>128h <span style={{ fontSize: 28 }}>45m</span></p>
+              {(() => {
+                const { hours, mins } = formatStudyTime(stats.totalStudyTimeMinutes);
+                return (
+                  <p className="font-jakarta font-bold" style={{ fontSize: 42, lineHeight: 1, background: 'linear-gradient(90deg, #DAF1DE, #A8D4DC)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+                    {hours}h <span style={{ fontSize: 28 }}>{mins}m</span>
+                  </p>
+                );
+              })()}
               <p className="text-xs" style={{ color: '#4a7a68' }}>Across all semesters</p>
             </div>
 
             {/* Upcoming Exams */}
+            {/* NOTE: Static 0 placeholder — pending future Exams feature implementation in later phase */}
             <div style={{ background: 'linear-gradient(145deg, #0e1e18 0%, #091a15 100%)', border: '1px solid rgba(142,182,155,0.12)', boxShadow: '0 0 40px rgba(142,182,155,0.04)' }} className="rounded-3xl p-8 flex flex-col gap-5">
               <div className="flex items-center gap-3">
                 <IconBadge bg="linear-gradient(135deg,#0d3d2a,#1a5c3a)" glow="rgba(142,182,155,0.3)" color="#8EB69B">
@@ -288,8 +348,8 @@ const Dashboard: React.FC = () => {
                 </IconBadge>
                 <span className="text-sm font-semibold" style={{ color: '#8EB69B' }}>Upcoming Exams</span>
               </div>
-              <p className="font-jakarta font-bold" style={{ fontSize: 52, lineHeight: 1, background: 'linear-gradient(135deg, #DAF1DE, #8EB69B)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>3</p>
-              <p className="text-xs" style={{ color: '#4a7a68' }}>In the next 14 days</p>
+              <p className="font-jakarta font-bold" style={{ fontSize: 52, lineHeight: 1, background: 'linear-gradient(135deg, #DAF1DE, #8EB69B)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>0</p>
+              <p className="text-xs" style={{ color: '#4a7a68' }}>Exams feature coming soon</p>
             </div>
 
             {/* Exam Readiness */}
@@ -300,8 +360,10 @@ const Dashboard: React.FC = () => {
                 </IconBadge>
                 <span className="text-sm font-semibold" style={{ color: '#B8A0E8' }}>Exam Readiness</span>
               </div>
-              <ReadinessRing value={85} />
-              <p className="text-xs text-center" style={{ color: '#4a7a68' }}>You're on track!</p>
+              <ReadinessRing value={statsLoading ? 0 : stats.examReadiness} />
+              <p className="text-xs text-center" style={{ color: '#4a7a68' }}>
+                {stats.examReadiness >= 80 ? "You're on track!" : stats.examReadiness >= 50 ? 'Steady progress' : 'Take more quizzes'}
+              </p>
             </div>
           </div>
 
@@ -319,23 +381,36 @@ const Dashboard: React.FC = () => {
                 </div>
                 <span className="text-sm font-medium cursor-pointer hover:underline" style={{ color: '#4EC9D4' }}>View all</span>
               </div>
+
               <div className="flex flex-col gap-6">
-                {[
-                  { name: 'Data Structures', pct: 32 },
-                  { name: 'Operating Systems', pct: 45 },
-                  { name: 'Computer Networks', pct: 48 },
-                  { name: 'Database Systems', pct: 52 },
-                ].map((s) => (
-                  <div key={s.name} className="flex flex-col gap-2">
-                    <div className="flex justify-between text-sm">
-                      <span style={{ color: '#DAF1DE', fontWeight: 500 }}>{s.name}</span>
-                      <span style={{ color: '#8EB69B' }}>{s.pct}%</span>
-                    </div>
-                    <div className="h-2.5 rounded-full" style={{ backgroundColor: 'rgba(255,255,255,0.06)' }}>
-                      <div className="h-2.5 rounded-full" style={{ width: `${s.pct}%`, background: 'linear-gradient(to right, #959BB9, #B8A0E8)', boxShadow: '0 0 8px rgba(149,155,185,0.4)' }} />
-                    </div>
+                {statsLoading ? (
+                  <div className="flex justify-center py-6">
+                    <svg className="animate-spin h-5 w-5 text-[#A8D4DC]" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/></svg>
                   </div>
-                ))}
+                ) : stats.weakSubjects.length === 0 ? (
+                  <div className="text-center py-6 px-4 text-xs rounded-2xl border border-dashed border-[#1a3a38] text-[#346659]">
+                    No weak subjects yet — take some quizzes to see your progress here.
+                  </div>
+                ) : (
+                  stats.weakSubjects.map((s) => (
+                    <div key={s.subjectId} className="flex flex-col gap-2">
+                      <div className="flex justify-between text-sm">
+                        <span style={{ color: '#DAF1DE', fontWeight: 500 }}>{s.name}</span>
+                        <span style={{ color: '#8EB69B' }}>{s.latestScore}%</span>
+                      </div>
+                      <div className="h-2.5 rounded-full" style={{ backgroundColor: 'rgba(255,255,255,0.06)' }}>
+                        <div
+                          className="h-2.5 rounded-full transition-all duration-500"
+                          style={{
+                            width: `${Math.min(s.latestScore, 100)}%`,
+                            background: 'linear-gradient(to right, #959BB9, #B8A0E8)',
+                            boxShadow: '0 0 8px rgba(149,155,185,0.4)',
+                          }}
+                        />
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
 

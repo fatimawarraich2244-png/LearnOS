@@ -24,6 +24,31 @@ interface ChatMessage {
   content: string;
 }
 
+interface QuizQuestion {
+  question: string;
+  options: string[];
+  correctAnswer: string;
+  explanation: string;
+}
+
+interface QuizResultItem {
+  question: string;
+  userAnswer: string;
+  correctAnswer: string;
+  isCorrect: boolean;
+  explanation: string;
+}
+
+interface QuizResultsData {
+  score: number;
+  quizId: string;
+  correctCount: number;
+  totalQuestions: number;
+  results: QuizResultItem[];
+}
+
+type QuizViewMode = 'setup' | 'taking' | 'results';
+
 const StudySubject: React.FC = () => {
   const { subjectId } = useParams<{ subjectId: string }>();
   const location = useLocation();
@@ -43,6 +68,16 @@ const StudySubject: React.FC = () => {
   const [currentQuestion, setCurrentQuestion] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Quiz state
+  const [quizDifficulty, setQuizDifficulty] = useState<'easy' | 'medium' | 'hard'>('medium');
+  const [quizViewMode, setQuizViewMode] = useState<QuizViewMode>('setup');
+  const [quizLoading, setQuizLoading] = useState(false);
+  const [quizError, setQuizError] = useState('');
+  const [quizQuestions, setQuizQuestions] = useState<QuizQuestion[]>([]);
+  const [userAnswers, setUserAnswers] = useState<string[]>([]);
+  const [submittingQuiz, setSubmittingQuiz] = useState(false);
+  const [quizResults, setQuizResults] = useState<QuizResultsData | null>(null);
 
   const { logoutUser } = useAuth();
 
@@ -132,6 +167,67 @@ const StudySubject: React.FC = () => {
     }
   };
 
+  // Generate Quiz handler
+  const handleGenerateQuiz = async () => {
+    if (!subjectId) return;
+    setQuizLoading(true);
+    setQuizError('');
+
+    try {
+      const res = await API.post('/quiz/generate', { subjectId, difficulty: quizDifficulty });
+      const questions: QuizQuestion[] = res.data.questions || [];
+      setQuizQuestions(questions);
+      setUserAnswers(new Array(questions.length).fill(''));
+      setQuizViewMode('taking');
+    } catch (err: any) {
+      setQuizError(err.response?.data?.message || 'Failed to generate quiz. Please check that you have uploaded materials.');
+    } finally {
+      setQuizLoading(false);
+    }
+  };
+
+  // Select Option handler
+  const handleSelectOption = (questionIndex: number, option: string) => {
+    setUserAnswers((prev) => {
+      const next = [...prev];
+      next[questionIndex] = option;
+      return next;
+    });
+  };
+
+  // Submit Quiz handler
+  const handleSubmitQuiz = async () => {
+    if (!subjectId || quizQuestions.length === 0) return;
+    setSubmittingQuiz(true);
+    setQuizError('');
+
+    try {
+      const res = await API.post('/quiz/submit', {
+        subjectId,
+        questions: quizQuestions,
+        userAnswers,
+        difficulty: quizDifficulty,
+      });
+      setQuizResults(res.data);
+      setQuizViewMode('results');
+    } catch (err: any) {
+      setQuizError(err.response?.data?.message || 'Failed to submit quiz. Please try again.');
+    } finally {
+      setSubmittingQuiz(false);
+    }
+  };
+
+  // Reset Quiz handler
+  const handleResetQuiz = () => {
+    setQuizViewMode('setup');
+    setQuizQuestions([]);
+    setUserAnswers([]);
+    setQuizResults(null);
+    setQuizError('');
+  };
+
+  const allAnswered = userAnswers.length > 0 && userAnswers.every((ans) => ans.trim() !== '');
+
   const backLink = subject?.semesterId ? `/semesters/${subject.semesterId}` : '/dashboard';
 
   return (
@@ -175,11 +271,11 @@ const StudySubject: React.FC = () => {
               {subject?.name || 'Study Subject'}
             </h1>
           )}
-          <p className="text-sm text-[#8EB69B]">Upload course materials and interact with your AI study assistant</p>
+          <p className="text-sm text-[#8EB69B]">Upload course materials, chat with AI, and test your knowledge with interactive quizzes</p>
         </div>
 
         {/* Two Column Layout */}
-        <div className="flex flex-col lg:flex-row gap-8 w-full flex-1">
+        <div className="flex flex-col lg:flex-row gap-8 w-full">
           {/* LEFT COLUMN: 40% Width - Upload & Materials */}
           <div className="w-full lg:w-[40%] flex flex-col gap-6">
             <div
@@ -361,6 +457,300 @@ const StudySubject: React.FC = () => {
               </form>
             </div>
           </div>
+        </div>
+
+        {/* SECTION 3: PRACTICE QUIZ SECTION */}
+        <div
+          style={{
+            background: 'linear-gradient(145deg, #0c1e1f 0%, #0a1720 100%)',
+            border: '1px solid rgba(168,212,220,0.12)',
+          }}
+          className="rounded-3xl p-6 md:p-8 flex flex-col gap-6 w-full"
+        >
+          {/* Section Title Header */}
+          <div className="flex items-center justify-between flex-wrap gap-4 pb-4 border-b border-white/5">
+            <div className="flex items-center gap-3">
+              <div style={{ width: 40, height: 40, background: 'linear-gradient(135deg, #1e4a6e 0%, #0d3d3a 100%)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#7EC8E3' }}>
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+              </div>
+              <div>
+                <h2 className="font-jakarta font-bold text-xl" style={{ color: '#DAF1DE' }}>AI Practice Quiz</h2>
+                <p className="text-xs text-[#8EB69B]">Test your comprehension of uploaded study materials</p>
+              </div>
+            </div>
+
+            {/* View Mode Tag */}
+            {quizViewMode === 'taking' && (
+              <span className="text-xs font-semibold px-3 py-1.5 rounded-full bg-teal-500/10 text-[#4EC9D4] border border-teal-500/20">
+                Quiz in Progress ({userAnswers.filter(a => a !== '').length} / {quizQuestions.length} answered)
+              </span>
+            )}
+            {quizViewMode === 'results' && (
+              <span className="text-xs font-semibold px-3 py-1.5 rounded-full bg-indigo-500/10 text-[#7EC8E3] border border-indigo-500/20">
+                Quiz Completed
+              </span>
+            )}
+          </div>
+
+          {/* SETUP MODE */}
+          {quizViewMode === 'setup' && (
+            <div className="flex flex-col gap-6 my-2">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 p-6 rounded-2xl" style={{ backgroundColor: 'rgba(6, 14, 16, 0.6)', border: '1px solid rgba(168,212,220,0.08)' }}>
+                <div className="flex flex-col gap-1 max-w-md">
+                  <h3 className="font-jakarta font-semibold text-base text-[#DAF1DE]">Ready to test your knowledge?</h3>
+                  <p className="text-xs text-[#8EB69B]">Select a difficulty level and generate 5 AI-created multiple choice questions derived directly from your notes.</p>
+                </div>
+
+                <div className="flex items-center gap-3 flex-wrap">
+                  {/* Difficulty selector */}
+                  <div className="flex items-center gap-2">
+                    <label htmlFor="quiz-difficulty" className="text-xs font-medium text-[#8EB69B]">Difficulty:</label>
+                    <select
+                      id="quiz-difficulty"
+                      value={quizDifficulty}
+                      onChange={(e) => setQuizDifficulty(e.target.value as 'easy' | 'medium' | 'hard')}
+                      disabled={quizLoading}
+                      style={{ backgroundColor: '#0A1A1B', border: '1px solid rgba(168,212,220,0.18)', color: '#DAF1DE' }}
+                      className="px-3.5 py-2.5 rounded-xl text-sm focus:outline-none focus:border-teal-400 cursor-pointer"
+                    >
+                      <option value="easy">Easy</option>
+                      <option value="medium">Medium</option>
+                      <option value="hard">Hard</option>
+                    </select>
+                  </div>
+
+                  {/* Generate Button */}
+                  <button
+                    onClick={handleGenerateQuiz}
+                    disabled={quizLoading}
+                    className="px-6 py-2.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-50 flex items-center gap-2 cursor-pointer hover:shadow-lg"
+                    style={{ background: 'linear-gradient(135deg, #A8D4DC 0%, #4EC9D4 100%)', color: '#040D0E', boxShadow: '0 0 15px rgba(168,212,220,0.2)' }}
+                  >
+                    {quizLoading ? (
+                      <>
+                        <svg className="animate-spin h-4 w-4 text-[#040D0E]" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/></svg>
+                        <span>Generating quiz...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>Generate Quiz</span>
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {quizError && (
+                <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm flex items-center gap-2">
+                  <svg className="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                  <span>{quizError}</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAKING MODE */}
+          {quizViewMode === 'taking' && (
+            <div className="flex flex-col gap-8 my-2">
+              <div className="flex flex-col gap-6">
+                {quizQuestions.map((q, qIndex) => {
+                  const selectedAnswer = userAnswers[qIndex];
+                  return (
+                    <div
+                      key={qIndex}
+                      className="p-6 md:p-7 rounded-2xl flex flex-col gap-4"
+                      style={{ backgroundColor: 'rgba(6, 14, 16, 0.6)', border: '1px solid rgba(168,212,220,0.1)' }}
+                    >
+                      <div className="flex items-start gap-3">
+                        <span className="flex items-center justify-center w-7 h-7 rounded-full bg-teal-500/10 text-[#4EC9D4] font-jakarta font-bold text-xs shrink-0">
+                          {qIndex + 1}
+                        </span>
+                        <h3 className="font-jakarta font-semibold text-base md:text-lg text-[#DAF1DE] pt-0.5">
+                          {q.question}
+                        </h3>
+                      </div>
+
+                      {/* Options Grid */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2 pl-0 md:pl-10">
+                        {q.options.map((opt, optIndex) => {
+                          const isSelected = selectedAnswer === opt;
+                          return (
+                            <button
+                              key={optIndex}
+                              type="button"
+                              onClick={() => handleSelectOption(qIndex, opt)}
+                              className={`p-4 rounded-xl text-sm font-medium text-left flex items-center justify-between gap-3 transition-all cursor-pointer ${
+                                isSelected
+                                  ? 'bg-[#4EC9D4]/10 border-2 border-[#4EC9D4] text-[#4EC9D4] shadow-[0_0_15px_rgba(78,201,212,0.15)]'
+                                  : 'bg-[#0A1A1B] border border-white/10 text-[#DAF1DE] hover:border-teal-500/30 hover:bg-[#0d2224]'
+                              }`}
+                            >
+                              <span>{opt}</span>
+                              <div
+                                className={`w-5 h-5 rounded-full border flex items-center justify-center shrink-0 transition-colors ${
+                                  isSelected ? 'border-[#4EC9D4] bg-[#4EC9D4]' : 'border-slate-600 bg-transparent'
+                                }`}
+                              >
+                                {isSelected && (
+                                  <div className="w-2 h-2 rounded-full bg-[#040D0E]" />
+                                )}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {quizError && (
+                <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
+                  {quizError}
+                </div>
+              )}
+
+              {/* Submit Quiz Actions */}
+              <div className="flex items-center justify-between pt-4 border-t border-white/5 flex-wrap gap-4">
+                <button
+                  onClick={handleResetQuiz}
+                  className="px-5 py-2.5 rounded-xl text-sm font-medium text-[#8EB69B] hover:text-[#DAF1DE] transition-colors"
+                >
+                  Cancel Quiz
+                </button>
+
+                <button
+                  onClick={handleSubmitQuiz}
+                  disabled={!allAnswered || submittingQuiz}
+                  className="px-8 py-3.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 cursor-pointer hover:shadow-lg"
+                  style={{ background: 'linear-gradient(135deg, #A8D4DC 0%, #4EC9D4 100%)', color: '#040D0E', boxShadow: '0 0 20px rgba(168,212,220,0.25)' }}
+                >
+                  {submittingQuiz ? (
+                    <>
+                      <svg className="animate-spin h-4 w-4 text-[#040D0E]" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/></svg>
+                      <span>Submitting...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Submit Quiz</span>
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/></svg>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* RESULTS MODE */}
+          {quizViewMode === 'results' && quizResults && (
+            <div className="flex flex-col gap-8 my-2">
+              {/* Overall Score Card */}
+              <div
+                className="p-8 rounded-2xl flex flex-col md:flex-row items-center justify-between gap-6 text-center md:text-left"
+                style={{ backgroundColor: 'rgba(6, 14, 16, 0.7)', border: '1px solid rgba(168,212,220,0.15)' }}
+              >
+                <div className="flex flex-col gap-2">
+                  <span className="text-xs uppercase tracking-wider font-semibold text-[#8EB69B]">Quiz Score</span>
+                  <div className="flex items-baseline gap-3 justify-center md:justify-start">
+                    <span
+                      className={`text-5xl font-extrabold font-jakarta ${
+                        quizResults.score >= 80
+                          ? 'text-emerald-400'
+                          : quizResults.score >= 50
+                          ? 'text-amber-400'
+                          : 'text-rose-400'
+                      }`}
+                    >
+                      {quizResults.score}%
+                    </span>
+                    <span className="text-sm font-medium text-[#DAF1DE]">
+                      ({quizResults.correctCount} / {quizResults.totalQuestions} correct)
+                    </span>
+                  </div>
+                  <p className="text-xs text-[#8EB69B] mt-1">
+                    {quizResults.score >= 80
+                      ? 'Great job! This subject has been updated to your strong topics.'
+                      : quizResults.score >= 50
+                      ? 'Solid effort! Keep reviewing materials to improve your mastery.'
+                      : 'Needs review. This subject has been flagged in your weak topics for extra study.'}
+                  </p>
+                </div>
+
+                <button
+                  onClick={handleResetQuiz}
+                  className="px-6 py-3 rounded-xl text-sm font-semibold transition-all flex items-center gap-2 cursor-pointer hover:shadow-lg shrink-0"
+                  style={{ background: 'linear-gradient(135deg, #A8D4DC 0%, #4EC9D4 100%)', color: '#040D0E', boxShadow: '0 0 15px rgba(168,212,220,0.2)' }}
+                >
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                  <span>Take Another Quiz</span>
+                </button>
+              </div>
+
+              {/* Individual Question Results */}
+              <div className="flex flex-col gap-6">
+                <h3 className="font-jakarta font-bold text-lg text-[#DAF1DE]">Detailed Results</h3>
+
+                {quizResults.results.map((resItem, idx) => (
+                  <div
+                    key={idx}
+                    className="p-6 rounded-2xl flex flex-col gap-4"
+                    style={{
+                      backgroundColor: 'rgba(6, 14, 16, 0.5)',
+                      border: resItem.isCorrect ? '1px solid rgba(74, 222, 128, 0.2)' : '1px solid rgba(248, 113, 113, 0.2)',
+                    }}
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex items-start gap-3">
+                        <div
+                          className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs shrink-0 mt-0.5 ${
+                            resItem.isCorrect ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'
+                          }`}
+                        >
+                          {resItem.isCorrect ? '✓' : '✕'}
+                        </div>
+                        <h4 className="font-jakarta font-semibold text-base text-[#DAF1DE] pt-0.5">
+                          {idx + 1}. {resItem.question}
+                        </h4>
+                      </div>
+
+                      <span
+                        className={`text-xs font-semibold px-2.5 py-1 rounded-full shrink-0 ${
+                          resItem.isCorrect
+                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                            : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                        }`}
+                      >
+                        {resItem.isCorrect ? 'Correct' : 'Incorrect'}
+                      </span>
+                    </div>
+
+                    <div className="flex flex-col gap-2 pl-0 md:pl-10 text-sm">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-medium text-[#8EB69B] w-28 shrink-0">Your Answer:</span>
+                        <span className={`font-medium ${resItem.isCorrect ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {resItem.userAnswer || 'None selected'}
+                        </span>
+                      </div>
+
+                      {!resItem.isCorrect && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-medium text-[#8EB69B] w-28 shrink-0">Correct Answer:</span>
+                          <span className="font-medium text-emerald-400">{resItem.correctAnswer}</span>
+                        </div>
+                      )}
+
+                      {/* Explanation box */}
+                      <div className="mt-2 p-3.5 rounded-xl bg-[#0A1A1B] border border-white/5 text-xs text-[#8EB69B] leading-relaxed">
+                        <span className="font-semibold text-[#A8D4DC] block mb-1">Explanation:</span>
+                        {resItem.explanation}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
