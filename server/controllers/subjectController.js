@@ -55,4 +55,52 @@ const deleteSubject = async (req, res) => {
   }
 };
 
-module.exports = { getSubjects, createSubject, deleteSubject };
+// ── @desc   Get subject by ID
+// ── @route  GET /api/subjects/single/:id
+// ── @access Private
+const getSubjectById = async (req, res) => {
+  try {
+    const subject = await Subject.findById(req.params.id);
+
+    if (!subject) {
+      return res.status(404).json({ message: 'Subject not found' });
+    }
+
+    if (subject.userId.toString() !== req.userId) {
+      return res.status(403).json({ message: 'Not authorized' });
+    }
+
+    return res.json(subject);
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+// ── @desc   Update a subject by ID
+// ── @route  PUT /api/subjects/:id
+// ── @access Private
+const updateSubject = async (req, res) => {
+  try {
+    const subject = await Subject.findById(req.params.id);
+
+    if (!subject) {
+      return res.status(404).json({ message: 'Subject not found' });
+    }
+
+    if (subject.userId.toString() !== req.userId) {
+      return res.status(403).json({ message: 'Not authorized' });
+    }
+
+    const { weakTopics, strongTopics, studyTimeMinutes } = req.body;
+    if (weakTopics !== undefined) subject.weakTopics = weakTopics;
+    if (strongTopics !== undefined) subject.strongTopics = strongTopics;
+    if (studyTimeMinutes !== undefined) subject.studyTimeMinutes = studyTimeMinutes;
+
+    await subject.save();
+    return res.json(subject);
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+module.exports = { getSubjects, createSubject, deleteSubject, getSubjectById, updateSubject };

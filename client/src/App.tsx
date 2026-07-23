@@ -4,6 +4,8 @@ import { useAuth } from './context/AuthContext';
 import Login from './pages/Auth/Login';
 import Signup from './pages/Auth/Signup';
 import Dashboard from './pages/Dashboard/Dashboard';
+import SubjectPage from './pages/Subject/SubjectPage';
+import StudySubject from './pages/Subject/StudySubject';
 
 interface PrivateRouteProps {
   children: React.ReactNode;
@@ -42,6 +44,22 @@ function App() {
           element={
             <PrivateRoute>
               <Dashboard />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/semesters/:semesterId"
+          element={
+            <PrivateRoute>
+              <SubjectPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/subjects/:subjectId"
+          element={
+            <PrivateRoute>
+              <StudySubject />
             </PrivateRoute>
           }
         />

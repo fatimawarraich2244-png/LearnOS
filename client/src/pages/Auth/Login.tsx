@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-// @ts-ignore - auth.js is a javascript file
+// @ts-ignore
 import { login } from '../../api/auth';
+import logo from '../../assets/logo.png';
 
 const Login: React.FC = () => {
   const [email, setEmail] = useState('');
@@ -17,13 +18,11 @@ const Login: React.FC = () => {
     e.preventDefault();
     setError('');
     setLoading(true);
-
     try {
       const res = await login({ email, password });
       loginUser(res.data);
       navigate('/dashboard');
     } catch (err: any) {
-      console.error(err);
       setError(err.response?.data?.message || 'Login failed');
     } finally {
       setLoading(false);
@@ -31,84 +30,86 @@ const Login: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-950 px-4 py-12 sm:px-6 lg:px-8">
-      {/* Background ambient glows */}
-      <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none"></div>
-      <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-violet-500/10 rounded-full blur-3xl pointer-events-none"></div>
+    <div className="min-h-screen bg-bg font-inter flex items-center justify-center px-4 py-12">
+      {/* Ambient glow */}
+      <div className="absolute top-1/3 left-1/2 -translate-x-1/2 w-[500px] h-[500px] bg-accent-teal/5 rounded-full blur-3xl pointer-events-none" />
 
-      <div className="max-w-md w-full space-y-8 bg-slate-900/60 backdrop-blur-xl border border-slate-800 p-8 rounded-2xl shadow-2xl relative z-10">
-        <div>
-          <h2 className="mt-2 text-center text-3xl font-extrabold tracking-tight text-white">
-            Welcome Back
-          </h2>
-          <p className="mt-2 text-center text-sm text-slate-400">
-            Sign in to access your dashboard
-          </p>
+      <div className="max-w-md w-full z-10">
+        {/* Logo above card */}
+        <div className="flex flex-col items-center mb-8 gap-3">
+          <img src={logo} alt="LearnOS" className="h-14 w-auto" />
+          <span className="font-jakarta font-bold text-2xl text-accent-teal tracking-wide">LearnOS</span>
         </div>
 
-        {error && (
-          <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-lg text-sm text-center">
-            {error}
+        <div className="bg-surface border border-border rounded-2xl p-8 shadow-2xl">
+          <div className="mb-8 text-center">
+            <h1 className="font-jakarta font-bold text-2xl text-text-primary mb-1">
+              Welcome back
+            </h1>
+            <p className="text-text-secondary text-sm">Sign in to continue your learning journey</p>
           </div>
-        )}
 
-        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-          <div className="space-y-4">
+          {error && (
+            <div className="mb-5 bg-red-500/10 border border-red-500/20 text-red-400 px-4 py-3 rounded-xl text-sm text-center">
+              {error}
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label htmlFor="email-address" className="block text-sm font-medium text-slate-300">
+              <label htmlFor="email" className="block text-sm font-medium text-text-secondary mb-1.5">
                 Email address
               </label>
               <input
-                id="email-address"
-                name="email"
+                id="email"
                 type="email"
                 autoComplete="email"
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="mt-1 block w-full px-4 py-3 bg-slate-800/80 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition duration-150 text-sm"
                 placeholder="you@example.com"
+                className="w-full px-4 py-3 bg-surface2 border border-border text-text-primary placeholder-text-muted rounded-xl text-sm focus:outline-none focus:border-accent-teal transition-colors"
               />
             </div>
+
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-slate-300">
+              <label htmlFor="password" className="block text-sm font-medium text-text-secondary mb-1.5">
                 Password
               </label>
               <input
                 id="password"
-                name="password"
                 type="password"
                 autoComplete="current-password"
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="mt-1 block w-full px-4 py-3 bg-slate-800/80 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition duration-150 text-sm"
                 placeholder="••••••••"
+                className="w-full px-4 py-3 bg-surface2 border border-border text-text-primary placeholder-text-muted rounded-xl text-sm focus:outline-none focus:border-accent-teal transition-colors"
               />
             </div>
-          </div>
 
-          <div>
             <button
               type="submit"
               disabled={loading}
-              className="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-xl text-white bg-indigo-600 hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition duration-150 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-indigo-600/20"
+              className="mt-2 w-full py-3 bg-accent-teal text-bg font-jakarta font-semibold rounded-xl hover:bg-[#8ec8d0] transition-colors duration-150 disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {loading ? (
-                <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                </svg>
-              ) : null}
-              {loading ? 'Signing in...' : 'Sign In'}
+                <>
+                  <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                  Signing in...
+                </>
+              ) : (
+                'Sign In'
+              )}
             </button>
-          </div>
-        </form>
+          </form>
 
-        <div className="text-center mt-4">
-          <p className="text-sm text-slate-400">
+          <p className="mt-6 text-center text-sm text-text-secondary">
             Don't have an account?{' '}
-            <Link to="/signup" className="font-medium text-indigo-400 hover:text-indigo-300 transition duration-150">
+            <Link to="/signup" className="text-accent-teal font-medium hover:underline">
               Sign up
             </Link>
           </p>
