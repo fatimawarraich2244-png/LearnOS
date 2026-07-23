@@ -60,6 +60,21 @@ interface QuizResultsData {
 
 type QuizViewMode = 'setup' | 'taking' | 'results';
 
+interface ScheduleItem {
+  date: string;
+  topics: string[];
+  durationMinutes: number;
+}
+
+interface StudyPlanData {
+  _id?: string;
+  subjectId: string;
+  examDate: string;
+  hoursPerDay: number;
+  schedule: ScheduleItem[];
+  createdAt?: string;
+}
+
 const StudySubject: React.FC = () => {
   const { subjectId } = useParams<{ subjectId: string }>();
   const location = useLocation();
@@ -104,6 +119,14 @@ const StudySubject: React.FC = () => {
   const [generatingMap, setGeneratingMap] = useState(false);
   const [mapError, setMapError] = useState('');
 
+  // Study Planner state
+  const [studyPlan, setStudyPlan] = useState<StudyPlanData | null>(null);
+  const [generatingPlan, setGeneratingPlan] = useState(false);
+  const [planError, setPlanError] = useState('');
+  const [examDateInput, setExamDateInput] = useState('');
+  const [hoursPerDayInput, setHoursPerDayInput] = useState(2);
+  const [showPlanSetup, setShowPlanSetup] = useState(false);
+
   const { logoutUser } = useAuth();
 
   // Scroll chat window to bottom when messages update
@@ -145,6 +168,23 @@ const StudySubject: React.FC = () => {
     };
 
     fetchSubjectDetails();
+  }, [subjectId]);
+
+  // Fetch existing study plan on mount
+  useEffect(() => {
+    const fetchStudyPlan = async () => {
+      if (!subjectId) return;
+      try {
+        const res = await API.get(`/planner/${subjectId}`);
+        if (res.data) {
+          setStudyPlan(res.data);
+        }
+      } catch (err) {
+        console.error('Failed to fetch study plan', err);
+      }
+    };
+
+    fetchStudyPlan();
   }, [subjectId]);
 
   // Fetch materials for subject
@@ -337,6 +377,35 @@ const StudySubject: React.FC = () => {
     }
   };
 
+  // Generate Study Plan Handler
+  const handleGeneratePlan = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!subjectId || !examDateInput || !hoursPerDayInput) return;
+
+    setGeneratingPlan(true);
+    setPlanError('');
+
+    try {
+      const res = await API.post('/planner/generate', {
+        subjectId,
+        examDate: examDateInput,
+        hoursPerDay: Number(hoursPerDayInput),
+      });
+      setStudyPlan(res.data.plan);
+      setShowPlanSetup(false);
+    } catch (err: any) {
+      setPlanError(
+        err.response?.data?.message || 'Failed to generate study plan. Please ensure you have generated a knowledge map.'
+      );
+    } finally {
+      setGeneratingPlan(false);
+    }
+  };
+
+  const handleCreateNewPlan = () => {
+    setShowPlanSetup(true);
+  };
+
   // Format Timer Display: MM:SS or HH:MM:SS
   const formatElapsedTime = (totalSecs: number) => {
     const hours = Math.floor(totalSecs / 3600);
@@ -351,9 +420,49 @@ const StudySubject: React.FC = () => {
     return `${pad(mins)}:${pad(secs)}`;
   };
 
+  const getTodayISO = () => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const formatDateNice = (dateStr: string) => {
+    try {
+      const [year, month, day] = dateStr.split('-').map(Number);
+      const d = new Date(year, month - 1, day);
+      return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    } catch {
+      return dateStr;
+    }
+  };
+
+  const getDaysUntilExam = (itemDateStr: string, examDateStr: string) => {
+    try {
+      const [iY, iM, iD] = itemDateStr.split('-').map(Number);
+      const itemDate = new Date(iY, iM - 1, iD);
+
+      const examDate = new Date(examDateStr);
+      examDate.setHours(0, 0, 0, 0);
+
+      const diffTime = examDate.getTime() - itemDate.getTime();
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+      if (diffDays === 0) return 'Exam Day!';
+      if (diffDays === 1) return '1 day before exam';
+      return `${diffDays} days before exam`;
+    } catch {
+      return '';
+    }
+  };
+
   const allAnswered = userAnswers.length > 0 && userAnswers.every((ans) => ans.trim() !== '');
 
   const backLink = subject?.semesterId ? `/semesters/${subject.semesterId}` : '/dashboard';
+
+  const hasKnowledgeMap = !!(knowledgeMapData?.topics && knowledgeMapData.topics.length > 0);
+  const todayISO = getTodayISO();
 
   return (
     <div className="min-h-screen font-inter flex flex-col relative overflow-x-hidden" style={{ backgroundColor: '#060E10', color: '#DAF1DE' }}>
@@ -520,7 +629,7 @@ const StudySubject: React.FC = () => {
             </div>
 
             {/* Regenerate Button if map exists */}
-            {knowledgeMapData && knowledgeMapData.topics && knowledgeMapData.topics.length > 0 && (
+            {hasKnowledgeMap && (
               <button
                 onClick={handleGenerateKnowledgeMap}
                 disabled={generatingMap}
@@ -543,7 +652,7 @@ const StudySubject: React.FC = () => {
           </div>
 
           {/* Body State: No map generated yet */}
-          {(!knowledgeMapData || !knowledgeMapData.topics || knowledgeMapData.topics.length === 0) && (
+          {!hasKnowledgeMap && (
             <div className="flex flex-col items-center justify-center p-8 rounded-2xl text-center gap-4 border border-dashed border-teal-500/20" style={{ backgroundColor: 'rgba(6, 14, 16, 0.6)' }}>
               <div className="w-12 h-12 rounded-2xl bg-teal-500/10 flex items-center justify-center text-[#4EC9D4]">
                 <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/></svg>
@@ -578,7 +687,7 @@ const StudySubject: React.FC = () => {
           )}
 
           {/* Body State: Knowledge Map Tree Visualization */}
-          {knowledgeMapData && knowledgeMapData.topics && knowledgeMapData.topics.length > 0 && (
+          {hasKnowledgeMap && (
             <div className="flex flex-col gap-6 relative pl-2 md:pl-4">
               {mapError && (
                 <p className="text-xs text-red-400 mb-2 px-4 py-2 rounded-xl bg-red-500/10 border border-red-500/20">{mapError}</p>
@@ -591,7 +700,7 @@ const StudySubject: React.FC = () => {
                   style={{ background: 'linear-gradient(180deg, rgba(78,201,212,0.4) 0%, rgba(149,155,185,0.2) 100%)' }}
                 />
 
-                {[...knowledgeMapData.topics]
+                {[...knowledgeMapData!.topics]
                   .sort((a, b) => (a.order || 0) - (b.order || 0))
                   .map((topic, idx) => (
                     <div key={idx} className="flex items-start gap-5 relative z-10">
@@ -646,7 +755,234 @@ const StudySubject: React.FC = () => {
           )}
         </div>
 
-        {/* SECTION 3: Two Column Layout */}
+        {/* SECTION 3: AI STUDY PLANNER CARD */}
+        <div
+          style={{
+            background: 'linear-gradient(145deg, #0c1e1f 0%, #0a1720 100%)',
+            border: '1px solid rgba(168,212,220,0.12)',
+          }}
+          className="rounded-3xl p-6 md:p-8 flex flex-col gap-6 w-full"
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between flex-wrap gap-4 pb-4 border-b border-white/5">
+            <div className="flex items-center gap-3">
+              <div style={{ width: 40, height: 40, background: 'linear-gradient(135deg, #1e3a5f 0%, #0d3d3a 100%)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#60A5FA' }}>
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+              </div>
+              <div>
+                <h2 className="font-jakarta font-bold text-xl" style={{ color: '#DAF1DE' }}>AI Study Planner</h2>
+                <p className="text-xs text-[#8EB69B]">Personalized day-by-day exam preparation schedule</p>
+              </div>
+            </div>
+
+            {/* Create New Plan Button if plan already exists */}
+            {studyPlan && !showPlanSetup && (
+              <button
+                onClick={handleCreateNewPlan}
+                className="px-4 py-2 rounded-xl text-xs font-semibold transition-all flex items-center gap-2 cursor-pointer hover:border-teal-400"
+                style={{ background: 'linear-gradient(135deg, #0d2820 0%, #0a1a2a 100%)', border: '1px solid rgba(168,212,220,0.2)', color: '#DAF1DE' }}
+              >
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4"/></svg>
+                <span>Create New Plan</span>
+              </button>
+            )}
+          </div>
+
+          {/* Condition A: No Knowledge Map generated yet */}
+          {!hasKnowledgeMap && (
+            <div className="flex flex-col items-center justify-center p-8 rounded-2xl text-center gap-3 border border-dashed border-teal-500/20" style={{ backgroundColor: 'rgba(6, 14, 16, 0.6)' }}>
+              <div className="w-10 h-10 rounded-2xl bg-amber-500/10 flex items-center justify-center text-amber-400">
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+              </div>
+              <p className="text-sm font-semibold text-[#DAF1DE]">Generate a Knowledge Map first before creating a study plan</p>
+              <p className="text-xs text-[#8EB69B] max-w-md">
+                Please scroll up to the Knowledge Map section above and click <strong>"Generate Knowledge Map"</strong> so the AI can sequence your topics.
+              </p>
+            </div>
+          )}
+
+          {/* Condition B: Knowledge Map exists, but no Study Plan or user clicked Create New Plan */}
+          {hasKnowledgeMap && (!studyPlan || showPlanSetup) && (
+            <form onSubmit={handleGeneratePlan} className="flex flex-col gap-6 my-2">
+              <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 p-6 rounded-2xl" style={{ backgroundColor: 'rgba(6, 14, 16, 0.6)', border: '1px solid rgba(168,212,220,0.08)' }}>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 flex-1">
+                  {/* Exam Date Picker */}
+                  <div className="flex flex-col gap-2">
+                    <label htmlFor="exam-date-picker" className="text-xs font-medium text-[#8EB69B]">Exam Date</label>
+                    <input
+                      id="exam-date-picker"
+                      type="date"
+                      required
+                      min={todayISO}
+                      value={examDateInput}
+                      onChange={(e) => setExamDateInput(e.target.value)}
+                      disabled={generatingPlan}
+                      style={{ backgroundColor: '#0A1A1B', border: '1px solid rgba(168,212,220,0.18)', color: '#DAF1DE' }}
+                      className="px-4 py-3 rounded-xl text-sm focus:outline-none focus:border-teal-400 cursor-pointer"
+                    />
+                  </div>
+
+                  {/* Hours Per Day Input */}
+                  <div className="flex flex-col gap-2">
+                    <label htmlFor="hours-per-day-input" className="text-xs font-medium text-[#8EB69B]">Available Study Hours / Day</label>
+                    <input
+                      id="hours-per-day-input"
+                      type="number"
+                      required
+                      min={0.5}
+                      max={14}
+                      step={0.5}
+                      value={hoursPerDayInput}
+                      onChange={(e) => setHoursPerDayInput(Number(e.target.value))}
+                      disabled={generatingPlan}
+                      style={{ backgroundColor: '#0A1A1B', border: '1px solid rgba(168,212,220,0.18)', color: '#DAF1DE' }}
+                      className="px-4 py-3 rounded-xl text-sm focus:outline-none focus:border-teal-400 cursor-pointer"
+                    />
+                  </div>
+                </div>
+
+                {/* Generate Action Button */}
+                <div className="flex items-center gap-3 shrink-0">
+                  {showPlanSetup && studyPlan && (
+                    <button
+                      type="button"
+                      onClick={() => setShowPlanSetup(false)}
+                      className="px-4 py-3 rounded-xl text-sm font-medium text-[#8EB69B] hover:text-[#DAF1DE] transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  )}
+                  <button
+                    type="submit"
+                    disabled={generatingPlan || !examDateInput}
+                    className="px-6 py-3 rounded-xl text-sm font-semibold transition-all disabled:opacity-50 flex items-center gap-2 cursor-pointer hover:shadow-lg"
+                    style={{ background: 'linear-gradient(135deg, #A8D4DC 0%, #4EC9D4 100%)', color: '#040D0E', boxShadow: '0 0 15px rgba(168,212,220,0.2)' }}
+                  >
+                    {generatingPlan ? (
+                      <>
+                        <svg className="animate-spin h-4 w-4 text-[#040D0E]" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/></svg>
+                        <span>Creating your personalized study plan...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>Generate Study Plan</span>
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {planError && (
+                <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
+                  {planError}
+                </div>
+              )}
+            </form>
+          )}
+
+          {/* Condition C: Study Plan exists and display mode active */}
+          {hasKnowledgeMap && studyPlan && !showPlanSetup && (
+            <div className="flex flex-col gap-6 my-2">
+              {/* Summary Sub-header */}
+              <div className="flex items-center justify-between flex-wrap gap-4 p-4 rounded-2xl bg-[#060E10]/60 border border-white/5">
+                <div className="flex items-center gap-6 flex-wrap text-xs text-[#8EB69B]">
+                  <div>
+                    <span className="text-[#DAF1DE] font-semibold block text-sm">
+                      {new Date(studyPlan.examDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                    </span>
+                    <span>Target Exam Date</span>
+                  </div>
+                  <div className="h-6 w-px bg-white/10" />
+                  <div>
+                    <span className="text-[#DAF1DE] font-semibold block text-sm">{studyPlan.hoursPerDay} hrs / day</span>
+                    <span>Daily Capacity</span>
+                  </div>
+                  <div className="h-6 w-px bg-white/10" />
+                  <div>
+                    <span className="text-[#4EC9D4] font-semibold block text-sm">{studyPlan.schedule?.length || 0} Days</span>
+                    <span>Schedule Duration</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Vertical Timeline List */}
+              <div className="flex flex-col gap-4 relative pl-2 md:pl-4">
+                <div
+                  className="absolute left-[19px] top-6 bottom-6 w-0.5 pointer-events-none"
+                  style={{ background: 'linear-gradient(180deg, rgba(78,201,212,0.4) 0%, rgba(96,165,250,0.2) 100%)' }}
+                />
+
+                {studyPlan.schedule.map((item, idx) => {
+                  const isToday = item.date === todayISO;
+                  const daysUntil = getDaysUntilExam(item.date, studyPlan.examDate);
+
+                  return (
+                    <div key={idx} className="flex items-start gap-5 relative z-10">
+                      {/* Timeline Day Dot / Icon */}
+                      <div
+                        className={`w-10 h-10 rounded-full flex items-center justify-center font-jakarta font-bold text-xs shrink-0 transition-all ${
+                          isToday
+                            ? 'bg-[#4EC9D4] text-[#040D0E] shadow-[0_0_15px_rgba(78,201,212,0.6)]'
+                            : 'bg-[#0A1A1B] border border-teal-500/30 text-[#A8D4DC]'
+                        }`}
+                      >
+                        {idx + 1}
+                      </div>
+
+                      {/* Schedule Item Card */}
+                      <div
+                        className={`flex-1 p-5 rounded-2xl flex flex-col gap-3 transition-all ${
+                          isToday
+                            ? 'bg-[#0A1F20] border-2 border-[#4EC9D4] shadow-[0_0_20px_rgba(78,201,212,0.2)]'
+                            : 'bg-[#060E10]/60 border border-white/10 hover:border-teal-500/30'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                          <div className="flex items-center gap-3">
+                            <h3 className="font-jakarta font-bold text-base text-[#DAF1DE]">
+                              {formatDateNice(item.date)}
+                            </h3>
+                            {isToday && (
+                              <span className="text-[10px] uppercase tracking-wider font-extrabold px-2.5 py-0.5 rounded-full bg-[#4EC9D4] text-[#040D0E]">
+                                Today
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-3">
+                            {daysUntil && (
+                              <span className="text-xs font-medium text-[#8EB69B] bg-white/5 px-3 py-1 rounded-lg border border-white/5">
+                                {daysUntil}
+                              </span>
+                            )}
+                            <span className="text-xs font-semibold text-[#4EC9D4] bg-teal-500/10 px-3 py-1 rounded-lg border border-teal-500/20">
+                              ⏱ {item.durationMinutes ? `${Math.round(item.durationMinutes / 60)}h ${item.durationMinutes % 60}m` : `${studyPlan.hoursPerDay}h`}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Topic list for this day */}
+                        {item.topics && item.topics.length > 0 && (
+                          <ul className="flex flex-col gap-2 mt-1 pl-1">
+                            {item.topics.map((t, tIdx) => (
+                              <li key={tIdx} className="flex items-center gap-2 text-sm text-[#A8D4DC]">
+                                <span className="w-1.5 h-1.5 rounded-full bg-[#4EC9D4] shrink-0" />
+                                <span>{t}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* SECTION 4: Two Column Layout */}
         <div className="flex flex-col lg:flex-row gap-8 w-full">
           {/* LEFT COLUMN: 40% Width - Upload & Materials */}
           <div className="w-full lg:w-[40%] flex flex-col gap-6">
@@ -831,7 +1167,7 @@ const StudySubject: React.FC = () => {
           </div>
         </div>
 
-        {/* SECTION 4: PRACTICE QUIZ SECTION */}
+        {/* SECTION 5: PRACTICE QUIZ SECTION */}
         <div
           style={{
             background: 'linear-gradient(145deg, #0c1e1f 0%, #0a1720 100%)',
