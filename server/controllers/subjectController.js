@@ -147,6 +147,39 @@ const getDashboardStats = async (req, res) => {
   }
 };
 
+// ── @desc   Log study time minutes for a subject
+// ── @route  POST /api/subjects/:id/log-time
+// ── @access Private
+const logStudyTime = async (req, res) => {
+  try {
+    const { minutes } = req.body;
+
+    if (typeof minutes !== 'number' || minutes <= 0 || isNaN(minutes)) {
+      return res.status(400).json({ message: 'Invalid minutes value' });
+    }
+
+    const subject = await Subject.findById(req.params.id);
+
+    if (!subject) {
+      return res.status(404).json({ message: 'Subject not found' });
+    }
+
+    if (subject.userId.toString() !== req.userId) {
+      return res.status(403).json({ message: 'Not authorized' });
+    }
+
+    const updatedSubject = await Subject.findByIdAndUpdate(
+      req.params.id,
+      { $inc: { studyTimeMinutes: minutes } },
+      { new: true }
+    );
+
+    return res.json(updatedSubject);
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
   getSubjects,
   createSubject,
@@ -154,4 +187,5 @@ module.exports = {
   getSubjectById,
   updateSubject,
   getDashboardStats,
+  logStudyTime,
 };

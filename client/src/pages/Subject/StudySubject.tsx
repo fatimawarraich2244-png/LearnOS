@@ -79,12 +79,28 @@ const StudySubject: React.FC = () => {
   const [submittingQuiz, setSubmittingQuiz] = useState(false);
   const [quizResults, setQuizResults] = useState<QuizResultsData | null>(null);
 
+  // Study Timer state
+  const [isTimerRunning, setIsTimerRunning] = useState(false);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [savingTimer, setSavingTimer] = useState(false);
+  const [timerMessage, setTimerMessage] = useState<{ type: 'info' | 'success' | 'error'; text: string } | null>(null);
+  const timerIntervalRef = useRef<any>(null);
+
   const { logoutUser } = useAuth();
 
   // Scroll chat window to bottom when messages update
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, chatLoading]);
+
+  // Clean up timer interval on unmount
+  useEffect(() => {
+    return () => {
+      if (timerIntervalRef.current) {
+        clearInterval(timerIntervalRef.current);
+      }
+    };
+  }, []);
 
   // Fetch subject details if not provided via location state
   useEffect(() => {
@@ -226,6 +242,67 @@ const StudySubject: React.FC = () => {
     setQuizError('');
   };
 
+  // Timer Handlers
+  const handleToggleTimer = () => {
+    if (isTimerRunning) {
+      if (timerIntervalRef.current) {
+        clearInterval(timerIntervalRef.current);
+        timerIntervalRef.current = null;
+      }
+      setIsTimerRunning(false);
+    } else {
+      setTimerMessage(null);
+      setIsTimerRunning(true);
+      timerIntervalRef.current = setInterval(() => {
+        setElapsedSeconds((prev) => prev + 1);
+      }, 1000);
+    }
+  };
+
+  const handleSaveTimer = async () => {
+    if (timerIntervalRef.current) {
+      clearInterval(timerIntervalRef.current);
+      timerIntervalRef.current = null;
+    }
+    setIsTimerRunning(false);
+
+    const minutes = Math.round(elapsedSeconds / 60);
+
+    if (minutes < 1) {
+      setTimerMessage({ type: 'info', text: 'Study for at least 1 minute to log time' });
+      return;
+    }
+
+    if (!subjectId) return;
+
+    setSavingTimer(true);
+    setTimerMessage(null);
+
+    try {
+      await API.post(`/subjects/${subjectId}/log-time`, { minutes });
+      setTimerMessage({ type: 'success', text: `Logged ${minutes} minute${minutes > 1 ? 's' : ''} of study time!` });
+      setElapsedSeconds(0);
+    } catch (err: any) {
+      setTimerMessage({ type: 'error', text: err.response?.data?.message || 'Failed to log study time' });
+    } finally {
+      setSavingTimer(false);
+    }
+  };
+
+  // Format Timer Display: MM:SS or HH:MM:SS
+  const formatElapsedTime = (totalSecs: number) => {
+    const hours = Math.floor(totalSecs / 3600);
+    const mins = Math.floor((totalSecs % 3600) / 60);
+    const secs = totalSecs % 60;
+
+    const pad = (num: number) => num.toString().padStart(2, '0');
+
+    if (hours > 0) {
+      return `${pad(hours)}:${pad(mins)}:${pad(secs)}`;
+    }
+    return `${pad(mins)}:${pad(secs)}`;
+  };
+
   const allAnswered = userAnswers.length > 0 && userAnswers.every((ans) => ans.trim() !== '');
 
   const backLink = subject?.semesterId ? `/semesters/${subject.semesterId}` : '/dashboard';
@@ -271,10 +348,110 @@ const StudySubject: React.FC = () => {
               {subject?.name || 'Study Subject'}
             </h1>
           )}
-          <p className="text-sm text-[#8EB69B]">Upload course materials, chat with AI, and test your knowledge with interactive quizzes</p>
+          <p className="text-sm text-[#8EB69B]">Upload course materials, chat with AI, track study time, and test your knowledge</p>
         </div>
 
-        {/* Two Column Layout */}
+        {/* SECTION 1: STUDY TIMER CARD */}
+        <div
+          style={{
+            background: 'linear-gradient(145deg, #0c1e1f 0%, #0a1720 100%)',
+            border: '1px solid rgba(168,212,220,0.12)',
+          }}
+          className="rounded-3xl p-6 md:p-7 flex flex-col gap-4 w-full"
+        >
+          <div className="flex flex-col md:flex-row items-center justify-between gap-6 w-full">
+            <div className="flex items-center gap-4">
+              <div style={{ width: 44, height: 44, background: 'linear-gradient(135deg, #0d3d3a 0%, #1a5c5a 100%)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#A8D4DC' }}>
+                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+              </div>
+              <div>
+                <h2 className="font-jakarta font-bold text-lg" style={{ color: '#DAF1DE' }}>Study Session Timer</h2>
+                <p className="text-xs text-[#8EB69B]">Track and log your active study time for this subject</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-6 flex-wrap justify-center md:justify-end">
+              {/* Large Monospace Timer Display with Glow Effect */}
+              <div className="px-6 py-2 rounded-2xl bg-[#060E10]/80 border border-teal-500/20 shadow-[0_0_20px_rgba(168,212,220,0.15)] flex items-center justify-center min-w-[140px]">
+                <span
+                  className="font-mono font-bold text-3xl md:text-4xl tracking-wider"
+                  style={{
+                    background: 'linear-gradient(135deg, #DAF1DE 0%, #4EC9D4 100%)',
+                    WebkitBackgroundClip: 'text',
+                    WebkitTextFillColor: 'transparent',
+                    filter: 'drop-shadow(0 0 10px rgba(168,212,220,0.4))',
+                  }}
+                >
+                  {formatElapsedTime(elapsedSeconds)}
+                </span>
+              </div>
+
+              {/* Actions */}
+              <div className="flex items-center gap-3">
+                {/* Start / Pause Button */}
+                <button
+                  type="button"
+                  onClick={handleToggleTimer}
+                  className={`px-5 py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center gap-2 cursor-pointer hover:shadow-lg ${
+                    isTimerRunning
+                      ? 'bg-amber-500/10 border border-amber-500/30 text-amber-300 hover:bg-amber-500/20'
+                      : 'bg-[#4EC9D4]/10 border border-[#4EC9D4]/30 text-[#4EC9D4] hover:bg-[#4EC9D4]/20'
+                  }`}
+                >
+                  {isTimerRunning ? (
+                    <>
+                      <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24"><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/></svg>
+                      <span>Pause</span>
+                    </>
+                  ) : (
+                    <>
+                      <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                      <span>Start</span>
+                    </>
+                  )}
+                </button>
+
+                {/* Save & Finish Button */}
+                <button
+                  type="button"
+                  onClick={handleSaveTimer}
+                  disabled={savingTimer || elapsedSeconds === 0}
+                  className="px-5 py-2.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 cursor-pointer hover:shadow-lg"
+                  style={{ background: 'linear-gradient(135deg, #A8D4DC 0%, #4EC9D4 100%)', color: '#040D0E', boxShadow: '0 0 15px rgba(168,212,220,0.2)' }}
+                >
+                  {savingTimer ? (
+                    <>
+                      <svg className="animate-spin h-4 w-4 text-[#040D0E]" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/></svg>
+                      <span>Saving...</span>
+                    </>
+                  ) : (
+                    <>
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/></svg>
+                      <span>Save & Finish</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Timer Message Notification */}
+          {timerMessage && (
+            <div
+              className={`w-full text-xs font-medium px-4 py-2.5 rounded-xl border flex items-center gap-2 ${
+                timerMessage.type === 'error'
+                  ? 'bg-red-500/10 border-red-500/20 text-red-400'
+                  : timerMessage.type === 'success'
+                  ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+                  : 'bg-teal-500/10 border-teal-500/20 text-[#4EC9D4]'
+              }`}
+            >
+              <span>{timerMessage.text}</span>
+            </div>
+          )}
+        </div>
+
+        {/* SECTION 2: Two Column Layout */}
         <div className="flex flex-col lg:flex-row gap-8 w-full">
           {/* LEFT COLUMN: 40% Width - Upload & Materials */}
           <div className="w-full lg:w-[40%] flex flex-col gap-6">
