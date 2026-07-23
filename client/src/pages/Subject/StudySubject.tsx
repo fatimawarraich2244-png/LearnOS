@@ -5,10 +5,21 @@ import API from '../../api/axios';
 import { useAuth } from '../../context/AuthContext';
 import logo from '../../assets/logo.png';
 
+interface TopicItem {
+  name: string;
+  subtopics: string[];
+  order: number;
+}
+
+interface KnowledgeMapData {
+  topics: TopicItem[];
+}
+
 interface Subject {
   _id: string;
   name: string;
   semesterId: string;
+  knowledgeMap?: KnowledgeMapData | null;
   createdAt?: string;
 }
 
@@ -86,6 +97,13 @@ const StudySubject: React.FC = () => {
   const [timerMessage, setTimerMessage] = useState<{ type: 'info' | 'success' | 'error'; text: string } | null>(null);
   const timerIntervalRef = useRef<any>(null);
 
+  // Knowledge Map state
+  const [knowledgeMapData, setKnowledgeMapData] = useState<KnowledgeMapData | null>(
+    initialSubject?.knowledgeMap || null
+  );
+  const [generatingMap, setGeneratingMap] = useState(false);
+  const [mapError, setMapError] = useState('');
+
   const { logoutUser } = useAuth();
 
   // Scroll chat window to bottom when messages update
@@ -102,6 +120,13 @@ const StudySubject: React.FC = () => {
     };
   }, []);
 
+  // Sync knowledge map if subject is loaded
+  useEffect(() => {
+    if (subject?.knowledgeMap) {
+      setKnowledgeMapData(subject.knowledgeMap);
+    }
+  }, [subject]);
+
   // Fetch subject details if not provided via location state
   useEffect(() => {
     const fetchSubjectDetails = async () => {
@@ -109,6 +134,9 @@ const StudySubject: React.FC = () => {
       try {
         const res = await API.get(`/subjects/single/${subjectId}`);
         setSubject(res.data);
+        if (res.data?.knowledgeMap) {
+          setKnowledgeMapData(res.data.knowledgeMap);
+        }
       } catch (err) {
         console.error('Failed to fetch subject details', err);
       } finally {
@@ -289,6 +317,26 @@ const StudySubject: React.FC = () => {
     }
   };
 
+  // Generate Knowledge Map Handler
+  const handleGenerateKnowledgeMap = async () => {
+    if (!subjectId) return;
+    setGeneratingMap(true);
+    setMapError('');
+
+    try {
+      const res = await API.post(`/subjects/${subjectId}/knowledge-map`);
+      const mapData = res.data.knowledgeMap;
+      setKnowledgeMapData(mapData);
+      setSubject((prev) => (prev ? { ...prev, knowledgeMap: mapData } : prev));
+    } catch (err: any) {
+      setMapError(
+        err.response?.data?.message || 'Failed to generate Knowledge Map. Make sure you have uploaded study materials.'
+      );
+    } finally {
+      setGeneratingMap(false);
+    }
+  };
+
   // Format Timer Display: MM:SS or HH:MM:SS
   const formatElapsedTime = (totalSecs: number) => {
     const hours = Math.floor(totalSecs / 3600);
@@ -348,7 +396,7 @@ const StudySubject: React.FC = () => {
               {subject?.name || 'Study Subject'}
             </h1>
           )}
-          <p className="text-sm text-[#8EB69B]">Upload course materials, chat with AI, track study time, and test your knowledge</p>
+          <p className="text-sm text-[#8EB69B]">Upload course materials, chat with AI, track study time, visualize knowledge maps, and test your knowledge</p>
         </div>
 
         {/* SECTION 1: STUDY TIMER CARD */}
@@ -451,7 +499,154 @@ const StudySubject: React.FC = () => {
           )}
         </div>
 
-        {/* SECTION 2: Two Column Layout */}
+        {/* SECTION 2: KNOWLEDGE MAP CARD */}
+        <div
+          style={{
+            background: 'linear-gradient(145deg, #0c1e1f 0%, #0a1720 100%)',
+            border: '1px solid rgba(168,212,220,0.12)',
+          }}
+          className="rounded-3xl p-6 md:p-8 flex flex-col gap-6 w-full"
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between flex-wrap gap-4 pb-4 border-b border-white/5">
+            <div className="flex items-center gap-3">
+              <div style={{ width: 40, height: 40, background: 'linear-gradient(135deg, #2a1a4a 0%, #0d3d3a 100%)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#B8A0E8' }}>
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/></svg>
+              </div>
+              <div>
+                <h2 className="font-jakarta font-bold text-xl" style={{ color: '#DAF1DE' }}>AI Knowledge Map</h2>
+                <p className="text-xs text-[#8EB69B]">Recommended learning path & topic hierarchy derived from your materials</p>
+              </div>
+            </div>
+
+            {/* Regenerate Button if map exists */}
+            {knowledgeMapData && knowledgeMapData.topics && knowledgeMapData.topics.length > 0 && (
+              <button
+                onClick={handleGenerateKnowledgeMap}
+                disabled={generatingMap}
+                className="px-4 py-2 rounded-xl text-xs font-semibold transition-all disabled:opacity-50 flex items-center gap-2 cursor-pointer hover:border-teal-400"
+                style={{ background: 'linear-gradient(135deg, #0d2820 0%, #0a1a2a 100%)', border: '1px solid rgba(168,212,220,0.2)', color: '#DAF1DE' }}
+              >
+                {generatingMap ? (
+                  <>
+                    <svg className="animate-spin h-3.5 w-3.5 text-[#4EC9D4]" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/></svg>
+                    <span>Analyzing...</span>
+                  </>
+                ) : (
+                  <>
+                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                    <span>Regenerate Map</span>
+                  </>
+                )}
+              </button>
+            )}
+          </div>
+
+          {/* Body State: No map generated yet */}
+          {(!knowledgeMapData || !knowledgeMapData.topics || knowledgeMapData.topics.length === 0) && (
+            <div className="flex flex-col items-center justify-center p-8 rounded-2xl text-center gap-4 border border-dashed border-teal-500/20" style={{ backgroundColor: 'rgba(6, 14, 16, 0.6)' }}>
+              <div className="w-12 h-12 rounded-2xl bg-teal-500/10 flex items-center justify-center text-[#4EC9D4]">
+                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/></svg>
+              </div>
+              <div className="max-w-md flex flex-col gap-1">
+                <h3 className="font-jakarta font-semibold text-base text-[#DAF1DE]">No Knowledge Map Generated Yet</h3>
+                <p className="text-xs text-[#8EB69B]">Upload your course documents and click below to build a structured, step-by-step topic roadmap.</p>
+              </div>
+              <button
+                onClick={handleGenerateKnowledgeMap}
+                disabled={generatingMap}
+                className="mt-2 px-6 py-3 rounded-xl text-sm font-semibold transition-all disabled:opacity-50 flex items-center gap-2 cursor-pointer hover:shadow-lg"
+                style={{ background: 'linear-gradient(135deg, #A8D4DC 0%, #4EC9D4 100%)', color: '#040D0E', boxShadow: '0 0 15px rgba(168,212,220,0.2)' }}
+              >
+                {generatingMap ? (
+                  <>
+                    <svg className="animate-spin h-4 w-4 text-[#040D0E]" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/></svg>
+                    <span>Analyzing your materials...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Generate Knowledge Map</span>
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                  </>
+                )}
+              </button>
+
+              {mapError && (
+                <p className="text-xs text-red-400 mt-2 px-4 py-2 rounded-xl bg-red-500/10 border border-red-500/20">{mapError}</p>
+              )}
+            </div>
+          )}
+
+          {/* Body State: Knowledge Map Tree Visualization */}
+          {knowledgeMapData && knowledgeMapData.topics && knowledgeMapData.topics.length > 0 && (
+            <div className="flex flex-col gap-6 relative pl-2 md:pl-4">
+              {mapError && (
+                <p className="text-xs text-red-400 mb-2 px-4 py-2 rounded-xl bg-red-500/10 border border-red-500/20">{mapError}</p>
+              )}
+
+              <div className="flex flex-col gap-6 relative">
+                {/* Continuous Vertical Flow Line connecting topic badges */}
+                <div
+                  className="absolute left-[19px] top-6 bottom-6 w-0.5 pointer-events-none"
+                  style={{ background: 'linear-gradient(180deg, rgba(78,201,212,0.4) 0%, rgba(149,155,185,0.2) 100%)' }}
+                />
+
+                {[...knowledgeMapData.topics]
+                  .sort((a, b) => (a.order || 0) - (b.order || 0))
+                  .map((topic, idx) => (
+                    <div key={idx} className="flex items-start gap-5 relative z-10">
+                      {/* Order Number Badge */}
+                      <div
+                        className="w-10 h-10 rounded-full flex items-center justify-center font-jakarta font-bold text-sm shrink-0"
+                        style={{
+                          background: 'linear-gradient(135deg, #0d3d3a 0%, #0c1e1f 100%)',
+                          border: '1px solid rgba(78,201,212,0.4)',
+                          color: '#4EC9D4',
+                          boxShadow: '0 0 15px rgba(78,201,212,0.25)',
+                        }}
+                      >
+                        {topic.order ?? idx + 1}
+                      </div>
+
+                      {/* Topic Content Card */}
+                      <div
+                        className="flex-1 p-5 rounded-2xl flex flex-col gap-3 transition-all hover:border-teal-500/30"
+                        style={{
+                          backgroundColor: 'rgba(6, 14, 16, 0.65)',
+                          border: '1px solid rgba(168,212,220,0.1)',
+                        }}
+                      >
+                        <h3 className="font-jakarta font-semibold text-base text-[#DAF1DE]">
+                          {topic.name}
+                        </h3>
+
+                        {/* Subtopic Pills */}
+                        {topic.subtopics && topic.subtopics.length > 0 && (
+                          <div className="flex flex-wrap gap-2 mt-1">
+                            {topic.subtopics.map((sub, sIdx) => (
+                              <span
+                                key={sIdx}
+                                className="text-xs px-3 py-1.5 rounded-lg font-medium transition-colors"
+                                style={{
+                                  backgroundColor: '#0A1A1B',
+                                  border: '1px solid rgba(168,212,220,0.12)',
+                                  color: '#A8D4DC',
+                                }}
+                              >
+                                {sub}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* SECTION 3: Two Column Layout */}
         <div className="flex flex-col lg:flex-row gap-8 w-full">
           {/* LEFT COLUMN: 40% Width - Upload & Materials */}
           <div className="w-full lg:w-[40%] flex flex-col gap-6">
@@ -636,7 +831,7 @@ const StudySubject: React.FC = () => {
           </div>
         </div>
 
-        {/* SECTION 3: PRACTICE QUIZ SECTION */}
+        {/* SECTION 4: PRACTICE QUIZ SECTION */}
         <div
           style={{
             background: 'linear-gradient(145deg, #0c1e1f 0%, #0a1720 100%)',

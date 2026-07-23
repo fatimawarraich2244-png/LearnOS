@@ -1,5 +1,7 @@
+const axios = require('axios');
 const Subject = require('../models/Subject');
 const Quiz = require('../models/Quiz');
+const Material = require('../models/Material');
 
 // ── @desc   Get all subjects for a semester
 // ── @route  GET /api/subjects/:semesterId
@@ -180,6 +182,104 @@ const logStudyTime = async (req, res) => {
   }
 };
 
+// ── @desc   Generate AI knowledge map for a subject based on uploaded materials
+// ── @route  POST /api/subjects/:id/knowledge-map
+// ── @access Private
+const generateKnowledgeMap = async (req, res) => {
+  try {
+    const subject = await Subject.findById(req.params.id);
+
+    if (!subject) {
+      return res.status(404).json({ message: 'Subject not found' });
+    }
+
+    if (subject.userId.toString() !== req.userId) {
+      return res.status(403).json({ message: 'Not authorized' });
+    }
+
+    const materials = await Material.find({
+      subjectId: req.params.id,
+      userId: req.userId,
+    });
+
+    if (!materials || materials.length === 0) {
+      return res.status(400).json({ message: 'No study materials found for this subject to generate a knowledge map.' });
+    }
+
+    let allChunks = [];
+    materials.forEach((mat) => {
+      if (mat.chunks && mat.chunks.length > 0) {
+        allChunks = allChunks.concat(mat.chunks);
+      }
+    });
+
+    if (allChunks.length === 0) {
+      return res.status(400).json({ message: 'Study materials contain no text content to generate a knowledge map.' });
+    }
+
+    const combinedText = allChunks.join('\n\n').slice(0, 6000);
+
+    const systemPrompt = `You are an expert curriculum planner and knowledge architect. Analyze the provided study material and generate a hierarchical topic tree showing main topics and subtopics in recommended learning order.
+You MUST respond ONLY with a single valid JSON object. Do not include any explanations, introduction, or text outside of the raw JSON object.
+
+JSON structure required:
+{
+  "topics": [
+    {
+      "name": "Main Topic Name",
+      "subtopics": ["Subtopic 1", "Subtopic 2", "Subtopic 3"],
+      "order": 1
+    }
+  ]
+}`;
+
+    const userPrompt = `Study Material for ${subject.name}:\n${combinedText}\n\nGenerate the hierarchical topic tree in JSON format now.`;
+
+    const response = await axios.post(
+      'https://api.groq.com/openai/v1/chat/completions',
+      {
+        model: 'llama-3.3-70b-versatile',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: 0.4,
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+
+    let rawContent = response.data?.choices?.[0]?.message?.content || '';
+    rawContent = rawContent.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+
+    let parsedTopics;
+    try {
+      parsedTopics = JSON.parse(rawContent);
+    } catch (parseErr) {
+      console.error('Failed to parse Groq knowledge map JSON output:', rawContent);
+      return res.status(500).json({
+        message: 'Failed to parse generated knowledge map data. Please try again.',
+        error: parseErr.message,
+      });
+    }
+
+    await Subject.findByIdAndUpdate(
+      req.params.id,
+      { knowledgeMap: parsedTopics },
+      { new: true }
+    );
+
+    return res.json({ knowledgeMap: parsedTopics });
+  } catch (error) {
+    console.error('Error in generateKnowledgeMap:', error.response?.data || error.message);
+    return res.status(500).json({ message: `Error generating knowledge map: ${error.message}` });
+  }
+};
+
 module.exports = {
   getSubjects,
   createSubject,
@@ -188,4 +288,5 @@ module.exports = {
   updateSubject,
   getDashboardStats,
   logStudyTime,
+  generateKnowledgeMap,
 };
