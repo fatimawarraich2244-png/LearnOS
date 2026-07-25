@@ -94,7 +94,8 @@ const updateSubject = async (req, res) => {
       return res.status(403).json({ message: 'Not authorized' });
     }
 
-    const { weakTopics, strongTopics, studyTimeMinutes } = req.body;
+    const { name, weakTopics, strongTopics, studyTimeMinutes } = req.body;
+    if (name !== undefined) subject.name = name;
     if (weakTopics !== undefined) subject.weakTopics = weakTopics;
     if (strongTopics !== undefined) subject.strongTopics = strongTopics;
     if (studyTimeMinutes !== undefined) subject.studyTimeMinutes = studyTimeMinutes;
@@ -209,7 +210,9 @@ const generateKnowledgeMap = async (req, res) => {
     let allChunks = [];
     materials.forEach((mat) => {
       if (mat.chunks && mat.chunks.length > 0) {
-        allChunks = allChunks.concat(mat.chunks);
+        // Filter out any null/empty/whitespace-only chunk strings before joining
+        const validChunks = mat.chunks.filter((c) => typeof c === 'string' && c.trim().length > 0);
+        allChunks = allChunks.concat(validChunks);
       }
     });
 
@@ -219,7 +222,16 @@ const generateKnowledgeMap = async (req, res) => {
 
     const combinedText = allChunks.join('\n\n').slice(0, 6000);
 
-    const systemPrompt = `You are an expert curriculum planner and knowledge architect. Analyze the provided study material and generate a hierarchical topic tree showing main topics and subtopics in recommended learning order.
+    // ── DEBUG: verify we're sending the actual uploaded material content ──────
+    console.log('[generateKnowledgeMap] subjectId:', req.params.id);
+    console.log('[generateKnowledgeMap] materials found:', materials.length, '| total chunks:', allChunks.length);
+    console.log('[generateKnowledgeMap] combinedText preview (first 500 chars):\n', combinedText.slice(0, 500));
+    // ─────────────────────────────────────────────────────────────────────────
+
+    const systemPrompt = `You are an expert curriculum planner and knowledge architect.
+Analyze ONLY the following text content provided by the user. DO NOT make any assumptions based on subject names, course titles, or labels — base your entire analysis strictly on the concepts and ideas present in the text itself.
+Generate a hierarchical topic tree showing the main topics and subtopics found in the text, ordered by recommended learning sequence (foundational concepts first).
+
 You MUST respond ONLY with a single valid JSON object. Do not include any explanations, introduction, or text outside of the raw JSON object.
 
 JSON structure required:
@@ -233,7 +245,8 @@ JSON structure required:
   ]
 }`;
 
-    const userPrompt = `Study Material for ${subject.name}:\n${combinedText}\n\nGenerate the hierarchical topic tree in JSON format now.`;
+    // NOTE: subject.name intentionally omitted — Groq must derive topics purely from the text content
+    const userPrompt = `Analyze ONLY the following study material text content. Ignore any subject name labels or course titles — extract the actual concepts and topics contained within this text:\n\n${combinedText}\n\nGenerate the hierarchical topic tree in JSON format now.`;
 
     const response = await axios.post(
       'https://api.groq.com/openai/v1/chat/completions',

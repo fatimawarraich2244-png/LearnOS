@@ -527,6 +527,21 @@ const Dashboard: React.FC = () => {
                 </div>
                 <svg className="h-4 w-4 group-hover:translate-x-0.5 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor" style={{ color: '#8EB69B' }}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/></svg>
               </button>
+
+              {/* View Learning Patterns → /brain */}
+              <Link
+                to="/brain"
+                className="flex items-center justify-between px-5 py-3.5 rounded-2xl text-sm font-medium transition-all group"
+                style={{ background: 'linear-gradient(135deg, #170d2a 0%, #12101e 100%)', border: '1px solid rgba(184,160,232,0.2)', color: '#DAF1DE', textDecoration: 'none' }}
+                onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = 'rgba(184,160,232,0.45)'; (e.currentTarget as HTMLAnchorElement).style.boxShadow = '0 0 20px rgba(184,160,232,0.15)'; }}
+                onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = 'rgba(184,160,232,0.2)'; (e.currentTarget as HTMLAnchorElement).style.boxShadow = 'none'; }}
+              >
+                <div className="flex items-center gap-2">
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" style={{ color: '#B8A0E8' }}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+                  <span style={{ background: 'linear-gradient(90deg, #DAF1DE, #B8A0E8)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>View Learning Patterns</span>
+                </div>
+                <svg className="h-4 w-4 group-hover:translate-x-0.5 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor" style={{ color: '#B8A0E8' }}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/></svg>
+              </Link>
             </div>
           </div>
 

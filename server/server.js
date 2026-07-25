@@ -32,6 +32,7 @@ app.use('/api/materials', require('./routes/materials'));
 app.use('/api/chat', require('./routes/chat'));
 app.use('/api/quiz', require('./routes/quiz'));
 app.use('/api/planner', require('./routes/planner'));
+app.use('/api/brain', require('./routes/brain'));
 
 // ── Start server ──────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 5000;

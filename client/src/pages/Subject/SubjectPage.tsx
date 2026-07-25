@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 // @ts-ignore
 import API from '../../api/axios';
@@ -34,6 +34,13 @@ const SubjectPage: React.FC = () => {
   const [addLoading, setAddLoading] = useState(false);
   const [error, setError] = useState('');
 
+  // Dropdown & Edit & Delete modal states
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [editingSubjectId, setEditingSubjectId] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
+  const [deletingSubject, setDeletingSubject] = useState<Subject | null>(null);
+
+  const menuRef = useRef<HTMLDivElement | null>(null);
   const { logoutUser } = useAuth();
 
   useEffect(() => {
@@ -52,6 +59,17 @@ const SubjectPage: React.FC = () => {
     }
   }, [semesterId]);
 
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setOpenMenuId(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   const handleAddSubject = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newSubject.trim()) return;
@@ -64,6 +82,35 @@ const SubjectPage: React.FC = () => {
       setError(err.response?.data?.message || 'Failed to add subject');
     } finally {
       setAddLoading(false);
+    }
+  };
+
+  const handleSaveRename = async (subjectId: string) => {
+    if (!editName.trim()) {
+      setEditingSubjectId(null);
+      return;
+    }
+    try {
+      const res = await API.put(`/subjects/${subjectId}`, { name: editName.trim() });
+      setSubjects((prev) =>
+        prev.map((s) => (s._id === subjectId ? { ...s, name: res.data.name } : s))
+      );
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to rename subject');
+    } finally {
+      setEditingSubjectId(null);
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deletingSubject) return;
+    try {
+      await API.delete(`/subjects/${deletingSubject._id}`);
+      setSubjects((prev) => prev.filter((s) => s._id !== deletingSubject._id));
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to delete subject');
+    } finally {
+      setDeletingSubject(null);
     }
   };
 
@@ -140,24 +187,115 @@ const SubjectPage: React.FC = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 w-full">
             {subjects.map((subject, idx) => {
               const theme = subjectThemes[idx % subjectThemes.length];
+              const isMenuOpen = openMenuId === subject._id;
+              const isEditing = editingSubjectId === subject._id;
+
               return (
                 <div
                   key={subject._id}
                   style={{ background: 'linear-gradient(145deg, #0c1e1f 0%, #0a1720 100%)', border: '1px solid rgba(168,212,220,0.12)', transition: 'all 0.25s ease' }}
-                  className="rounded-3xl p-7 flex flex-col gap-5 group"
+                  className="rounded-3xl p-7 flex flex-col gap-5 group relative"
                   onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.border = '1px solid rgba(168,212,220,0.35)'; (e.currentTarget as HTMLDivElement).style.boxShadow = `0 0 28px ${theme.glow}`; }}
                   onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.border = '1px solid rgba(168,212,220,0.12)'; (e.currentTarget as HTMLDivElement).style.boxShadow = 'none'; }}
                 >
-                  {/* Top row: icon */}
+                  {/* Top row: icon + 3-dot menu */}
                   <div className="flex items-start justify-between">
                     <div style={{ width: 52, height: 52, background: theme.iconBg, boxShadow: `0 0 20px ${theme.glow}`, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyItems: 'center', justifyContent: 'center', color: theme.iconColor }}>
                       <div style={{ width: 22, height: 22 }}>{SubjectIcons[idx % SubjectIcons.length]}</div>
                     </div>
+
+                    {/* 3-dot menu button */}
+                    <div className="relative">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setOpenMenuId(isMenuOpen ? null : subject._id);
+                        }}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+                      >
+                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
+                        </svg>
+                      </button>
+
+                      {/* Dropdown Menu */}
+                      {isMenuOpen && (
+                        <div
+                          ref={menuRef}
+                          style={{
+                            background: 'linear-gradient(135deg, #0a1f20 0%, #0d2826 100%)',
+                            border: '1px solid rgba(168,212,220,0.25)',
+                            boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+                          }}
+                          className="absolute right-0 mt-2 w-36 rounded-xl py-1.5 z-20 overflow-hidden"
+                        >
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingSubjectId(subject._id);
+                              setEditName(subject.name);
+                              setOpenMenuId(null);
+                            }}
+                            className="w-full text-left px-4 py-2 text-xs font-medium text-[#DAF1DE] hover:bg-white/10 flex items-center gap-2 transition-colors"
+                          >
+                            <svg className="w-3.5 h-3.5 text-[#A8D4DC]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                            </svg>
+                            Rename
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDeletingSubject(subject);
+                              setOpenMenuId(null);
+                            }}
+                            className="w-full text-left px-4 py-2 text-xs font-medium text-red-400 hover:bg-red-500/10 flex items-center gap-2 transition-colors"
+                          >
+                            <svg className="w-3.5 h-3.5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                            Delete
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
 
-                  {/* Info */}
+                  {/* Info / Rename Input */}
                   <div className="flex flex-col gap-1 flex-1">
-                    <h3 className="font-jakarta font-bold text-lg leading-snug" style={{ color: '#DAF1DE' }}>{subject.name}</h3>
+                    {isEditing ? (
+                      <div className="flex flex-col gap-2">
+                        <input
+                          type="text"
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveRename(subject._id);
+                            if (e.key === 'Escape') setEditingSubjectId(null);
+                          }}
+                          autoFocus
+                          style={{ backgroundColor: '#0A1A1B', border: '1px solid rgba(78,201,212,0.4)', color: '#DAF1DE' }}
+                          className="w-full px-3 py-1.5 rounded-lg text-sm focus:outline-none"
+                        />
+                        <div className="flex gap-2 justify-end">
+                          <button
+                            onClick={() => setEditingSubjectId(null)}
+                            className="px-2.5 py-1 rounded-md text-xs text-slate-400 hover:text-white bg-white/5 transition-colors"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            onClick={() => handleSaveRename(subject._id)}
+                            style={{ background: 'linear-gradient(135deg, #A8D4DC 0%, #4EC9D4 100%)', color: '#040D0E' }}
+                            className="px-2.5 py-1 rounded-md text-xs font-semibold transition-all"
+                          >
+                            Save
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <h3 className="font-jakarta font-bold text-lg leading-snug" style={{ color: '#DAF1DE' }}>{subject.name}</h3>
+                    )}
                   </div>
 
                   {/* Footer */}
@@ -177,6 +315,48 @@ const SubjectPage: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {deletingSubject && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+          <div
+            style={{
+              background: 'linear-gradient(145deg, #0c1e1f 0%, #0a1720 100%)',
+              border: '1px solid rgba(248,113,113,0.3)',
+              boxShadow: '0 0 32px rgba(248,113,113,0.15)',
+            }}
+            className="rounded-3xl p-6 max-w-md w-full flex flex-col gap-5"
+          >
+            <div className="flex items-center gap-3 text-red-400">
+              <div className="w-10 h-10 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center shrink-0">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+              </div>
+              <h3 className="font-jakarta font-bold text-lg text-white">Delete Subject</h3>
+            </div>
+
+            <p className="text-sm text-slate-300">
+              Delete subject <strong className="text-white">{deletingSubject.name}</strong> and all its materials, quizzes, and chat history? This cannot be undone.
+            </p>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                onClick={() => setDeletingSubject(null)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 bg-white/5 hover:bg-white/10 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmDelete}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-white bg-red-600 hover:bg-red-500 transition-colors shadow-lg shadow-red-600/20"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

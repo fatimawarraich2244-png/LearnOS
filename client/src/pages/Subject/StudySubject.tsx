@@ -93,6 +93,7 @@ const StudySubject: React.FC = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [currentQuestion, setCurrentQuestion] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
+  const [isConfusionMode, setIsConfusionMode] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   // Quiz state
@@ -204,6 +205,22 @@ const StudySubject: React.FC = () => {
     fetchMaterials();
   }, [subjectId]);
 
+  // Fetch chat history for subject
+  useEffect(() => {
+    const fetchChatHistory = async () => {
+      if (!subjectId) return;
+      try {
+        const res = await API.get(`/chat/${subjectId}`);
+        setMessages(res.data);
+      } catch (err) {
+        console.error('Failed to fetch chat history', err);
+      }
+    };
+
+    fetchChatHistory();
+  }, [subjectId]);
+
+
   // File upload handler
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -234,17 +251,25 @@ const StudySubject: React.FC = () => {
     if (!currentQuestion.trim() || chatLoading || !subjectId) return;
 
     const question = currentQuestion.trim();
-    setMessages((prev) => [...prev, { role: 'user', content: question }]);
+    const isConfusion = isConfusionMode;
+    const userMessageContent = isConfusion ? `I'm confused about: ${question}` : question;
+
+    setMessages((prev) => [...prev, { role: 'user', content: userMessageContent }]);
     setCurrentQuestion('');
     setChatLoading(true);
 
     try {
-      const res = await API.post('/chat/ask', { subjectId, question });
+      const endpoint = isConfusion ? '/chat/confusion' : '/chat/ask';
+      const payload = isConfusion
+        ? { subjectId, confusedTopic: question }
+        : { subjectId, question };
+
+      const res = await API.post(endpoint, payload);
       setMessages((prev) => [...prev, { role: 'assistant', content: res.data.answer }]);
     } catch (err: any) {
       setMessages((prev) => [
         ...prev,
-        { role: 'assistant', content: err.response?.data?.message || 'Sorry, something went wrong answering your question.' },
+        { role: 'assistant', content: err.response?.data?.message || 'Sorry, something went wrong answering your request.' },
       ]);
     } finally {
       setChatLoading(false);
@@ -1080,14 +1105,41 @@ const StudySubject: React.FC = () => {
               className="rounded-3xl p-6 md:p-8 flex flex-col flex-1"
             >
               {/* Header */}
-              <div className="flex items-center gap-3 pb-4 mb-4 border-b border-white/5">
-                <div style={{ width: 40, height: 40, background: 'linear-gradient(135deg, #0d3d3a 0%, #1a5c5a 100%)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#A8D4DC' }}>
-                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/></svg>
+              <div className="flex items-center justify-between pb-4 mb-4 border-b border-white/5 flex-wrap gap-4">
+                <div className="flex items-center gap-3">
+                  <div style={{ width: 40, height: 40, background: isConfusionMode ? 'linear-gradient(135deg, #4c1d95 0%, #6b21a8 100%)' : 'linear-gradient(135deg, #0d3d3a 0%, #1a5c5a 100%)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: isConfusionMode ? '#c084fc' : '#A8D4DC', transition: 'all 0.3s ease' }}>
+                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/></svg>
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h2 className="font-jakarta font-bold text-lg" style={{ color: '#DAF1DE' }}>
+                        {isConfusionMode ? "AI Confusion Detector" : "AI Study Assistant"}
+                      </h2>
+                      {isConfusionMode && (
+                        <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-md bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                          Diagnostic Active
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-[#8EB69B]">
+                      {isConfusionMode ? "Find missing prerequisites & clarify root causes of confusion" : "Ask questions powered by your uploaded course materials"}
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <h2 className="font-jakarta font-bold text-lg" style={{ color: '#DAF1DE' }}>AI Study Assistant</h2>
-                  <p className="text-xs text-[#8EB69B]">Ask questions powered by your uploaded course materials</p>
-                </div>
+
+                {/* Confusion Mode Toggle Button */}
+                <button
+                  type="button"
+                  onClick={() => setIsConfusionMode(!isConfusionMode)}
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer ${
+                    isConfusionMode
+                      ? 'bg-purple-600/20 border border-purple-400 text-purple-300 shadow-[0_0_15px_rgba(168,85,247,0.3)]'
+                      : 'bg-teal-500/10 border border-teal-500/20 text-[#4EC9D4] hover:bg-teal-500/20'
+                  }`}
+                >
+                  <span className="text-sm">{isConfusionMode ? '🔍' : '💡'}</span>
+                  <span>{isConfusionMode ? 'Exit Confusion Mode' : "I'm Confused Mode"}</span>
+                </button>
               </div>
 
               {/* Chat Message Window (600px Height) */}
@@ -1107,35 +1159,71 @@ const StudySubject: React.FC = () => {
                     </div>
                     <p className="text-sm font-medium text-[#DAF1DE]">No questions asked yet</p>
                     <p className="text-xs text-[#4a7a68] max-w-sm">
-                      Upload your course documents on the left, then ask any question about key concepts, formulas, or summaries!
+                      Upload your course documents on the left, then ask any question or toggle "I'm Confused Mode" to diagnose tricky topics!
                     </p>
                   </div>
                 )}
 
-                {messages.map((msg, i) => (
-                  <div key={i} className={`flex w-full ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    <div
-                      className={`max-w-[85%] rounded-2xl p-4 text-sm leading-relaxed whitespace-pre-wrap ${
-                        msg.role === 'user' ? 'rounded-tr-xs text-[#040D0E] font-medium' : 'rounded-tl-xs text-[#DAF1DE]'
-                      }`}
-                      style={{
-                        backgroundColor: msg.role === 'user' ? '#4EC9D4' : '#0A1A1B',
-                        border: msg.role === 'assistant' ? '1px solid rgba(168,212,220,0.15)' : 'none',
-                        boxShadow: msg.role === 'user' ? '0 0 20px rgba(78,201,212,0.15)' : 'none',
-                      }}
-                    >
-                      {msg.content}
+                {messages.map((msg, i) => {
+                  const isUserConfusion = msg.role === 'user' && msg.content.startsWith("I'm confused about:");
+                  const isPrevUserConfusion = i > 0 && messages[i - 1]?.role === 'user' && messages[i - 1]?.content.startsWith("I'm confused about:");
+                  const isAssistantDiagnostic = msg.role === 'assistant' && (
+                    isPrevUserConfusion ||
+                    msg.content.includes("Likely Root Cause") ||
+                    msg.content.includes("Foundation First") ||
+                    msg.content.includes("Now It Should Click")
+                  );
+
+                  return (
+                    <div key={i} className={`flex w-full ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                      <div
+                        className={`max-w-[85%] rounded-2xl p-4 text-sm leading-relaxed whitespace-pre-wrap ${
+                          msg.role === 'user' ? 'rounded-tr-xs font-medium' : 'rounded-tl-xs text-[#DAF1DE]'
+                        }`}
+                        style={{
+                          backgroundColor: isUserConfusion
+                            ? '#7e22ce'
+                            : msg.role === 'user'
+                            ? '#4EC9D4'
+                            : isAssistantDiagnostic
+                            ? '#120B24'
+                            : '#0A1A1B',
+                          color: msg.role === 'user' ? (isUserConfusion ? '#ffffff' : '#040D0E') : '#DAF1DE',
+                          border: isAssistantDiagnostic
+                            ? '1px solid rgba(168, 85, 247, 0.4)'
+                            : isUserConfusion
+                            ? '1px solid rgba(192, 132, 252, 0.5)'
+                            : msg.role === 'assistant'
+                            ? '1px solid rgba(168,212,220,0.15)'
+                            : 'none',
+                          boxShadow: isAssistantDiagnostic
+                            ? '0 0 20px rgba(168, 85, 247, 0.15)'
+                            : isUserConfusion
+                            ? '0 0 20px rgba(168, 85, 247, 0.3)'
+                            : msg.role === 'user'
+                            ? '0 0 20px rgba(78,201,212,0.15)'
+                            : 'none',
+                        }}
+                      >
+                        {isAssistantDiagnostic && (
+                          <div className="flex items-center gap-1.5 text-xs font-bold text-purple-300 mb-2 pb-2 border-b border-purple-500/25">
+                            <span className="text-sm">🔍</span>
+                            <span>AI Diagnostic Breakdown</span>
+                          </div>
+                        )}
+                        {msg.content}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
 
                 {chatLoading && (
                   <div className="flex w-full justify-start">
-                    <div className="max-w-[85%] rounded-2xl rounded-tl-xs p-4 flex items-center gap-2" style={{ backgroundColor: '#0A1A1B', border: '1px solid rgba(168,212,220,0.15)' }}>
-                      <span className="text-xs text-[#8EB69B]">AI is analyzing your materials...</span>
-                      <span className="h-1.5 w-1.5 rounded-full bg-[#A8D4DC] animate-bounce" style={{ animationDelay: '0ms' }} />
-                      <span className="h-1.5 w-1.5 rounded-full bg-[#A8D4DC] animate-bounce" style={{ animationDelay: '150ms' }} />
-                      <span className="h-1.5 w-1.5 rounded-full bg-[#A8D4DC] animate-bounce" style={{ animationDelay: '300ms' }} />
+                    <div className="max-w-[85%] rounded-2xl rounded-tl-xs p-4 flex items-center gap-2" style={{ backgroundColor: isConfusionMode ? '#120B24' : '#0A1A1B', border: isConfusionMode ? '1px solid rgba(168,85,247,0.4)' : '1px solid rgba(168,212,220,0.15)' }}>
+                      <span className="text-xs text-[#8EB69B]">{isConfusionMode ? 'AI is diagnosing missing prerequisites...' : 'AI is analyzing your materials...'}</span>
+                      <span className={`h-1.5 w-1.5 rounded-full ${isConfusionMode ? 'bg-purple-400' : 'bg-[#A8D4DC]'} animate-bounce`} style={{ animationDelay: '0ms' }} />
+                      <span className={`h-1.5 w-1.5 rounded-full ${isConfusionMode ? 'bg-purple-400' : 'bg-[#A8D4DC]'} animate-bounce`} style={{ animationDelay: '150ms' }} />
+                      <span className={`h-1.5 w-1.5 rounded-full ${isConfusionMode ? 'bg-purple-400' : 'bg-[#A8D4DC]'} animate-bounce`} style={{ animationDelay: '300ms' }} />
                     </div>
                   </div>
                 )}
@@ -1143,23 +1231,45 @@ const StudySubject: React.FC = () => {
               </div>
 
               {/* Chat Input & Send Button Pinned at Bottom */}
-              <form onSubmit={handleAskQuestion} className="flex gap-3">
+              <form onSubmit={handleAskQuestion} className="flex gap-3 items-center">
                 <input
                   type="text"
-                  placeholder="Ask a question about this subject..."
+                  placeholder={isConfusionMode ? "What topic are you confused about?" : "Ask a question about this subject..."}
                   value={currentQuestion}
                   onChange={(e) => setCurrentQuestion(e.target.value)}
                   disabled={chatLoading}
-                  style={{ backgroundColor: '#0A1A1B', border: '1px solid rgba(168,212,220,0.18)', color: '#DAF1DE' }}
-                  className="flex-1 px-4 py-3.5 rounded-xl text-sm placeholder-[#235347] focus:outline-none focus:border-teal-400 transition-colors"
+                  style={{
+                    backgroundColor: isConfusionMode ? '#140D28' : '#0A1A1B',
+                    border: isConfusionMode ? '1px solid rgba(168,85,247,0.4)' : '1px solid rgba(168,212,220,0.18)',
+                    color: '#DAF1DE'
+                  }}
+                  className={`flex-1 px-4 py-3.5 rounded-xl text-sm focus:outline-none transition-colors ${
+                    isConfusionMode ? 'placeholder-purple-400/50 focus:border-purple-400' : 'placeholder-[#235347] focus:border-teal-400'
+                  }`}
                 />
+                <button
+                  type="button"
+                  onClick={() => setIsConfusionMode((prev) => !prev)}
+                  className={`px-3.5 py-3.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer border ${
+                    isConfusionMode
+                      ? 'bg-purple-600/30 border-purple-400 text-purple-300 shadow-[0_0_15px_rgba(168,85,247,0.3)]'
+                      : 'bg-[#0A1A1B] border-white/10 text-[#8EB69B] hover:text-[#DAF1DE]'
+                  }`}
+                  title="Toggle Confusion Detector mode"
+                >
+                  {isConfusionMode ? "✓ Confused Mode" : "I'm Confused"}
+                </button>
                 <button
                   type="submit"
                   disabled={chatLoading || !currentQuestion.trim()}
                   className="px-6 py-3.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-50 flex items-center gap-2 hover:shadow-lg shrink-0 cursor-pointer"
-                  style={{ background: 'linear-gradient(135deg, #A8D4DC 0%, #4EC9D4 100%)', color: '#040D0E', boxShadow: '0 0 15px rgba(168,212,220,0.2)' }}
+                  style={{
+                    background: isConfusionMode ? 'linear-gradient(135deg, #c084fc 0%, #9333ea 100%)' : 'linear-gradient(135deg, #A8D4DC 0%, #4EC9D4 100%)',
+                    color: isConfusionMode ? '#ffffff' : '#040D0E',
+                    boxShadow: isConfusionMode ? '0 0 15px rgba(168,85,247,0.3)' : '0 0 15px rgba(168,212,220,0.2)'
+                  }}
                 >
-                  <span>Send</span>
+                  <span>{isConfusionMode ? 'Diagnose' : 'Send'}</span>
                   <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
                 </button>
               </form>

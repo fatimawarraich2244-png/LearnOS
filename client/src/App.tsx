@@ -6,6 +6,7 @@ import Signup from './pages/Auth/Signup';
 import Dashboard from './pages/Dashboard/Dashboard';
 import SubjectPage from './pages/Subject/SubjectPage';
 import StudySubject from './pages/Subject/StudySubject';
+import GlobalBrainPage from './pages/Brain/GlobalBrain';
 
 interface PrivateRouteProps {
   children: React.ReactNode;
@@ -60,6 +61,14 @@ function App() {
           element={
             <PrivateRoute>
               <StudySubject />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/brain"
+          element={
+            <PrivateRoute>
+              <GlobalBrainPage />
             </PrivateRoute>
           }
         />
