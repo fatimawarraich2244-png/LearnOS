@@ -28,6 +28,14 @@ const quizSchema = new mongoose.Schema(
       type: String,
       default: 'medium',
     },
+    examMode: {
+      type: Boolean,
+      default: false,
+    },
+    timeTakenSeconds: {
+      type: Number,
+      default: 0,
+    },
     takenAt: {
       type: Date,
       default: Date.now,
