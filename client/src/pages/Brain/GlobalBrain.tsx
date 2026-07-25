@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import API from '../../api/axios';
 import { useAuth } from '../../context/AuthContext';
 import logo from '../../assets/logo.png';
+import toast from 'react-hot-toast';
 
 interface ConceptItem {
   concept: string;
@@ -95,12 +96,16 @@ const GlobalBrainPage: React.FC = () => {
     try {
       const res = await API.post('/brain/update');
       setBrainData(res.data.brain);
+      toast.success('Learning pattern analysis updated!');
     } catch (err: any) {
       const msg = err.response?.data?.message || 'Failed to analyze patterns.';
-      if (msg.toLowerCase().includes('at least 2')) {
+      if (err.response?.status === 429) {
+        toast.error(msg);
+      } else if (msg.toLowerCase().includes('at least 2')) {
         setInsufficientData(true);
       } else {
         setError(msg);
+        toast.error(msg);
       }
     } finally {
       setAnalyzing(false);
@@ -118,9 +123,14 @@ const GlobalBrainPage: React.FC = () => {
       } else if (res.data.learningDNA) {
         setLearningDNA(res.data.learningDNA);
         setDnaMessage('');
+        toast.success('Learning DNA analysis refreshed!');
       }
     } catch (err: any) {
-      setDnaMessage(err.response?.data?.message || 'Failed to analyze Learning DNA.');
+      const errMsg = err.response?.status === 429
+        ? (err.response?.data?.message || 'You have reached the hourly limit for AI requests. Please try again later.')
+        : (err.response?.data?.message || 'Failed to analyze Learning DNA.');
+      setDnaMessage(errMsg);
+      toast.error(errMsg);
     } finally {
       setDnaAnalyzing(false);
     }

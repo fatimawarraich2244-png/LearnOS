@@ -1,11 +1,12 @@
 const express = require('express');
 const router = express.Router();
 const { protect } = require('../middleware/auth');
+const { aiRateLimiter } = require('../middleware/rateLimiter');
 const { updateGlobalBrain } = require('../controllers/brainController');
 const GlobalBrain = require('../models/GlobalBrain');
 
 // POST /api/brain/update — Run AI analysis and update GlobalBrain
-router.post('/update', protect, updateGlobalBrain);
+router.post('/update', protect, aiRateLimiter, updateGlobalBrain);
 
 // GET /api/brain/ — Return the current GlobalBrain for this user (or null)
 router.get('/', protect, async (req, res) => {

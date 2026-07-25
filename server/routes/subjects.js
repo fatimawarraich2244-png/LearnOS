@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { protect } = require('../middleware/auth');
+const { aiRateLimiter } = require('../middleware/rateLimiter');
 const {
   getSubjects,
   createSubject,
@@ -24,7 +25,7 @@ router.get('/single/:id', protect, getSubjectById);
 router.get('/:semesterId', protect, getSubjects);
 router.post('/', protect, createSubject);
 router.post('/:id/log-time', protect, logStudyTime);
-router.post('/:id/knowledge-map', protect, generateKnowledgeMap);
+router.post('/:id/knowledge-map', protect, aiRateLimiter, generateKnowledgeMap);
 router.put('/:id', protect, updateSubject);
 router.delete('/:id', protect, deleteSubject);
 

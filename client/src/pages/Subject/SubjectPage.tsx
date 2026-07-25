@@ -4,6 +4,7 @@ import { useParams, Link } from 'react-router-dom';
 import API from '../../api/axios';
 import { useAuth } from '../../context/AuthContext';
 import logo from '../../assets/logo.png';
+import toast from 'react-hot-toast';
 
 interface Subject {
   _id: string;
@@ -32,7 +33,6 @@ const SubjectPage: React.FC = () => {
   const [newSubject, setNewSubject] = useState('');
   const [loading, setLoading] = useState(true);
   const [addLoading, setAddLoading] = useState(false);
-  const [error, setError] = useState('');
 
   // Dropdown & Edit & Delete modal states
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
@@ -49,7 +49,7 @@ const SubjectPage: React.FC = () => {
         const res = await API.get(`/subjects/${semesterId}`);
         setSubjects(res.data);
       } catch (err: any) {
-        setError('Failed to fetch subjects');
+        toast.error('Failed to fetch subjects');
       } finally {
         setLoading(false);
       }
@@ -78,8 +78,9 @@ const SubjectPage: React.FC = () => {
       const res = await API.post('/subjects', { name: newSubject.trim(), semesterId });
       setSubjects((prev) => [...prev, res.data]);
       setNewSubject('');
+      toast.success('Subject added successfully!');
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to add subject');
+      toast.error(err.response?.data?.message || 'Failed to add subject');
     } finally {
       setAddLoading(false);
     }
@@ -95,8 +96,9 @@ const SubjectPage: React.FC = () => {
       setSubjects((prev) =>
         prev.map((s) => (s._id === subjectId ? { ...s, name: res.data.name } : s))
       );
+      toast.success('Subject renamed successfully!');
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to rename subject');
+      toast.error(err.response?.data?.message || 'Failed to rename subject');
     } finally {
       setEditingSubjectId(null);
     }
@@ -107,8 +109,9 @@ const SubjectPage: React.FC = () => {
     try {
       await API.delete(`/subjects/${deletingSubject._id}`);
       setSubjects((prev) => prev.filter((s) => s._id !== deletingSubject._id));
+      toast.success('Subject deleted successfully!');
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to delete subject');
+      toast.error(err.response?.data?.message || 'Failed to delete subject');
     } finally {
       setDeletingSubject(null);
     }
@@ -170,8 +173,6 @@ const SubjectPage: React.FC = () => {
               ) : (<>+ Add Subject</>)}
             </button>
           </form>
-
-          {error && <p className="text-red-400 text-sm bg-red-400/10 border border-red-400/20 rounded-xl px-4 py-2">{error}</p>}
         </div>
 
         {/* Subjects grid */}

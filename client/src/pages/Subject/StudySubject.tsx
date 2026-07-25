@@ -5,6 +5,7 @@ import API from '../../api/axios';
 import { useAuth } from '../../context/AuthContext';
 import logo from '../../assets/logo.png';
 import confetti from 'canvas-confetti';
+import toast from 'react-hot-toast';
 
 interface TopicItem {
   name: string;
@@ -106,6 +107,7 @@ const StudySubject: React.FC = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [currentQuestion, setCurrentQuestion] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
   const [isConfusionMode, setIsConfusionMode] = useState(false);
   const [isFeynmanMode, setIsFeynmanMode] = useState(false);
   const [feynmanStep, setFeynmanStep] = useState<1 | 2>(1);
@@ -114,6 +116,14 @@ const StudySubject: React.FC = () => {
   type ExplainLevel = 'normal' | 'eli6' | 'highschool' | 'university' | 'exam' | 'interview';
   const [explainLevel, setExplainLevel] = useState<ExplainLevel>('normal');
   const chatEndRef = useRef<HTMLDivElement>(null);
+  // Voice Teaching (SpeechRecognition & SpeechSynthesis) state
+  const [isListening, setIsListening] = useState(false);
+  const [speakingMsgIndex, setSpeakingMsgIndex] = useState<number | null>(null);
+  const recognitionRef = useRef<any>(null);
+  const baseTranscriptRef = useRef<string>('');
+
+  const isSpeechRecognitionSupported =
+    typeof window !== 'undefined' && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window);
 
   // Quiz state
   const [quizDifficulty, setQuizDifficulty] = useState<'easy' | 'medium' | 'hard'>('medium');
@@ -362,18 +372,37 @@ const StudySubject: React.FC = () => {
       setUploadStatus({ type: 'success', message: `Successfully uploaded: ${file.name}` });
       setMaterials((prev) => [res.data, ...prev]);
       triggerXpGain(10);
+      toast.success(`Successfully uploaded: ${file.name}`);
     } catch (err: any) {
-      setUploadStatus({ type: 'error', message: err.response?.data?.message || 'Upload failed' });
+      const errMsg = err.response?.data?.message || 'Upload failed';
+      setUploadStatus({ type: 'error', message: errMsg });
+      toast.error(errMsg);
     } finally {
       setIsUploading(false);
       e.target.value = '';
     }
   };
 
+  // Delete material handler
+  const handleDeleteMaterial = async (id: string) => {
+    const confirmed = window.confirm(
+      'Delete this material? This will also affect any quizzes/knowledge maps generated from it.'
+    );
+    if (!confirmed) return;
+
+    try {
+      await API.delete(`/materials/${id}`);
+      setMaterials((prev) => prev.filter((m) => m._id !== id));
+      toast.success('Material deleted');
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to delete material');
+    }
+  };
+
   // Chat form submit handler
   const handleAskQuestion = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!currentQuestion.trim() || chatLoading || !subjectId) return;
+    if (!currentQuestion.trim() || chatLoading || isStreaming || !subjectId) return;
 
     const question = currentQuestion.trim();
     const isLevelActive = explainLevel !== 'normal';
@@ -386,9 +415,14 @@ const StudySubject: React.FC = () => {
       userMessageContent = `I'm confused about: ${question}`;
     }
 
-    setMessages((prev) => [...prev, { role: 'user', content: userMessageContent }]);
+    setMessages((prev) => [
+      ...prev,
+      { role: 'user', content: userMessageContent },
+      { role: 'assistant', content: '' },
+    ]);
     setCurrentQuestion('');
     setChatLoading(true);
+    setIsStreaming(true);
 
     try {
       let endpoint = '/chat/ask';
@@ -402,50 +436,242 @@ const StudySubject: React.FC = () => {
         payload = { subjectId, confusedTopic: question };
       }
 
-      const res = await API.post(endpoint, payload);
-      setMessages((prev) => [...prev, { role: 'assistant', content: res.data.answer }]);
+      const token = localStorage.getItem('token');
+      const authHeader = token ? (token.startsWith('Bearer ') ? token : `Bearer ${token}`) : '';
+      const baseURL = API.defaults.baseURL || 'http://localhost:5000/api';
+      const response = await fetch(`${baseURL}${endpoint}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': authHeader,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok || !response.body) {
+        if (response.status === 429) {
+          const data = await response.json().catch(() => ({}));
+          const rateMsg = data.message || 'You have reached the hourly limit for AI requests. Please try again later.';
+          toast.error(rateMsg);
+          throw new Error(rateMsg);
+        }
+        throw new Error(`Server returned status ${response.status}`);
+      }
+
+      setChatLoading(false);
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let done = false;
+      let buffer = '';
+
+      while (!done) {
+        const { value, done: readerDone } = await reader.read();
+        done = readerDone;
+        if (value) {
+          buffer += decoder.decode(value, { stream: !done });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed || !trimmed.startsWith('data:')) continue;
+            if (trimmed === 'data: [DONE]') {
+              done = true;
+              break;
+            }
+            try {
+              const jsonStr = trimmed.replace(/^data:\s*/, '');
+              const data = JSON.parse(jsonStr);
+              if (data.content) {
+                const chunkText = data.content;
+                setMessages((prev) => {
+                  const newMsgs = [...prev];
+                  const lastIdx = newMsgs.length - 1;
+                  if (lastIdx >= 0 && newMsgs[lastIdx].role === 'assistant') {
+                    newMsgs[lastIdx] = {
+                      ...newMsgs[lastIdx],
+                      content: newMsgs[lastIdx].content + chunkText,
+                    };
+                  }
+                  return newMsgs;
+                });
+              }
+            } catch (err) {
+              console.error('Error parsing SSE line:', err);
+            }
+          }
+        }
+      }
+
+      if (buffer.trim().startsWith('data:') && buffer.trim() !== 'data: [DONE]') {
+        try {
+          const jsonStr = buffer.trim().replace(/^data:\s*/, '');
+          const data = JSON.parse(jsonStr);
+          if (data.content) {
+            setMessages((prev) => {
+              const newMsgs = [...prev];
+              const lastIdx = newMsgs.length - 1;
+              if (lastIdx >= 0 && newMsgs[lastIdx].role === 'assistant') {
+                newMsgs[lastIdx] = {
+                  ...newMsgs[lastIdx],
+                  content: newMsgs[lastIdx].content + data.content,
+                };
+              }
+              return newMsgs;
+            });
+          }
+        } catch (e) {}
+      }
+
       triggerXpGain(5);
     } catch (err: any) {
-      setMessages((prev) => [
-        ...prev,
-        { role: 'assistant', content: err.response?.data?.message || 'Sorry, something went wrong answering your request.' },
-      ]);
+      setMessages((prev) => {
+        const newMsgs = [...prev];
+        const lastIdx = newMsgs.length - 1;
+        if (lastIdx >= 0 && newMsgs[lastIdx].role === 'assistant' && !newMsgs[lastIdx].content) {
+          newMsgs[lastIdx] = {
+            role: 'assistant',
+            content: err.message || 'Sorry, something went wrong answering your request.',
+          };
+        }
+        return newMsgs;
+      });
     } finally {
       setChatLoading(false);
+      setIsStreaming(false);
     }
   };
 
   // Feynman mode submit handler
   const handleFeynmanSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!feynmanTopic.trim() || !feynmanExplanation.trim() || chatLoading || !subjectId) return;
+    if (!feynmanTopic.trim() || !feynmanExplanation.trim() || chatLoading || isStreaming || !subjectId) return;
 
     const topic = feynmanTopic.trim();
     const explanation = feynmanExplanation.trim();
     const rawUserContent = `Teaching: ${topic} - ${explanation}`;
     const userMessageContent = rawUserContent.length > 300 ? rawUserContent.slice(0, 300) + '...' : rawUserContent;
 
-    setMessages((prev) => [...prev, { role: 'user', content: userMessageContent }]);
+    setMessages((prev) => [
+      ...prev,
+      { role: 'user', content: userMessageContent },
+      { role: 'assistant', content: '' },
+    ]);
     setChatLoading(true);
+    setIsStreaming(true);
 
     try {
-      const res = await API.post('/chat/feynman', {
-        subjectId,
-        topic,
-        studentExplanation: explanation,
+      const token = localStorage.getItem('token');
+      const authHeader = token ? (token.startsWith('Bearer ') ? token : `Bearer ${token}`) : '';
+      const baseURL = API.defaults.baseURL || 'http://localhost:5000/api';
+      const response = await fetch(`${baseURL}/chat/feynman`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': authHeader,
+        },
+        body: JSON.stringify({
+          subjectId,
+          topic,
+          studentExplanation: explanation,
+        }),
       });
 
-      setMessages((prev) => [...prev, { role: 'assistant', content: res.data.answer }]);
+      if (!response.ok || !response.body) {
+        if (response.status === 429) {
+          const data = await response.json().catch(() => ({}));
+          const rateMsg = data.message || 'You have reached the hourly limit for AI requests. Please try again later.';
+          toast.error(rateMsg);
+          throw new Error(rateMsg);
+        }
+        throw new Error(`Server returned status ${response.status}`);
+      }
+
+      setChatLoading(false);
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let done = false;
+      let buffer = '';
+
+      while (!done) {
+        const { value, done: readerDone } = await reader.read();
+        done = readerDone;
+        if (value) {
+          buffer += decoder.decode(value, { stream: !done });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed || !trimmed.startsWith('data:')) continue;
+            if (trimmed === 'data: [DONE]') {
+              done = true;
+              break;
+            }
+            try {
+              const jsonStr = trimmed.replace(/^data:\s*/, '');
+              const data = JSON.parse(jsonStr);
+              if (data.content) {
+                const chunkText = data.content;
+                setMessages((prev) => {
+                  const newMsgs = [...prev];
+                  const lastIdx = newMsgs.length - 1;
+                  if (lastIdx >= 0 && newMsgs[lastIdx].role === 'assistant') {
+                    newMsgs[lastIdx] = {
+                      ...newMsgs[lastIdx],
+                      content: newMsgs[lastIdx].content + chunkText,
+                    };
+                  }
+                  return newMsgs;
+                });
+              }
+            } catch (err) {
+              console.error('Error parsing SSE line:', err);
+            }
+          }
+        }
+      }
+
+      if (buffer.trim().startsWith('data:') && buffer.trim() !== 'data: [DONE]') {
+        try {
+          const jsonStr = buffer.trim().replace(/^data:\s*/, '');
+          const data = JSON.parse(jsonStr);
+          if (data.content) {
+            setMessages((prev) => {
+              const newMsgs = [...prev];
+              const lastIdx = newMsgs.length - 1;
+              if (lastIdx >= 0 && newMsgs[lastIdx].role === 'assistant') {
+                newMsgs[lastIdx] = {
+                  ...newMsgs[lastIdx],
+                  content: newMsgs[lastIdx].content + data.content,
+                };
+              }
+              return newMsgs;
+            });
+          }
+        } catch (e) {}
+      }
+
       setFeynmanExplanation('');
       setFeynmanTopic('');
       setFeynmanStep(1);
     } catch (err: any) {
-      setMessages((prev) => [
-        ...prev,
-        { role: 'assistant', content: err.response?.data?.message || 'Sorry, something went wrong evaluating your explanation.' },
-      ]);
+      setMessages((prev) => {
+        const newMsgs = [...prev];
+        const lastIdx = newMsgs.length - 1;
+        if (lastIdx >= 0 && newMsgs[lastIdx].role === 'assistant' && !newMsgs[lastIdx].content) {
+          newMsgs[lastIdx] = {
+            role: 'assistant',
+            content: err.message || 'Sorry, something went wrong evaluating your explanation.',
+          };
+        }
+        return newMsgs;
+      });
     } finally {
       setChatLoading(false);
+      setIsStreaming(false);
     }
   };
 
@@ -459,6 +685,14 @@ const StudySubject: React.FC = () => {
   };
 
   const toggleFeynmanMode = () => {
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      setSpeakingMsgIndex(null);
+    }
+    if (recognitionRef.current) {
+      try { recognitionRef.current.stop(); } catch (e) {}
+      setIsListening(false);
+    }
     if (!isFeynmanMode) {
       setIsFeynmanMode(true);
       setIsConfusionMode(false);
@@ -467,6 +701,115 @@ const StudySubject: React.FC = () => {
       setIsFeynmanMode(false);
       setFeynmanStep(1);
     }
+  };
+
+  const handleToggleListening = () => {
+    if (!isSpeechRecognitionSupported) return;
+
+    if (isListening) {
+      if (recognitionRef.current) {
+        try { recognitionRef.current.stop(); } catch (e) {}
+      }
+      setIsListening(false);
+      return;
+    }
+
+    const SpeechRecognitionClass = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognitionClass) return;
+
+    const recognition = new SpeechRecognitionClass();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+
+    baseTranscriptRef.current = feynmanExplanation ? (feynmanExplanation.trim() + ' ') : '';
+
+    recognition.onresult = (event: any) => {
+      let finalTranscript = '';
+      let interimTranscript = '';
+
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const chunk = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          finalTranscript += chunk;
+        } else {
+          interimTranscript += chunk;
+        }
+      }
+
+      const combined = baseTranscriptRef.current + (finalTranscript || interimTranscript);
+      setFeynmanExplanation(combined);
+      if (finalTranscript) {
+        baseTranscriptRef.current += finalTranscript + ' ';
+      }
+    };
+
+    recognition.onerror = (event: any) => {
+      console.error('Speech recognition error:', event.error);
+      setIsListening(false);
+      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+        toast.error('Microphone access denied — please allow microphone permissions in your browser settings');
+      } else if (event.error === 'no-speech') {
+        toast.error('No speech detected. Please try speaking again.');
+      } else {
+        toast.error(`Voice input error: ${event.error}`);
+      }
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+    };
+
+    recognitionRef.current = recognition;
+    try {
+      recognition.start();
+      setIsListening(true);
+    } catch (err) {
+      console.error('Failed to start speech recognition:', err);
+    }
+  };
+
+  const stripMarkdown = (text: string) => {
+    return text
+      .replace(/^#{1,6}\s+/gm, '')
+      .replace(/\*\*(.*?)\*\*/g, '$1')
+      .replace(/\*(.*?)\*/g, '$1')
+      .replace(/`(.*?)`/g, '$1')
+      .replace(/\[(.*?)\]\(.*?\)/g, '$1')
+      .replace(/^[*-]\s+/gm, '')
+      .trim();
+  };
+
+  const handleToggleSpeak = (msgIndex: number, text: string) => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+      toast.error('Text-to-speech not supported in this browser.');
+      return;
+    }
+
+    if (speakingMsgIndex === msgIndex) {
+      window.speechSynthesis.cancel();
+      setSpeakingMsgIndex(null);
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+
+    const cleanText = stripMarkdown(text);
+    const utterance = new SpeechSynthesisUtterance(cleanText);
+    utterance.lang = 'en-US';
+    utterance.rate = 1.0;
+
+    utterance.onend = () => {
+      setSpeakingMsgIndex(null);
+    };
+
+    utterance.onerror = (e) => {
+      console.error('Speech synthesis error:', e);
+      setSpeakingMsgIndex(null);
+    };
+
+    setSpeakingMsgIndex(msgIndex);
+    window.speechSynthesis.speak(utterance);
   };
 
   const getKnowledgeMapTopicOptions = () => {
@@ -507,7 +850,11 @@ const StudySubject: React.FC = () => {
       setUserAnswers(new Array(questions.length).fill(''));
       setQuizViewMode('taking');
     } catch (err: any) {
-      setQuizError(err.response?.data?.message || 'Failed to generate quiz. Please check that you have uploaded materials.');
+      const errMsg = err.response?.status === 429
+        ? (err.response?.data?.message || 'You have reached the hourly limit for AI requests. Please try again later.')
+        : (err.response?.data?.message || 'Failed to generate quiz. Please check that you have uploaded materials.');
+      setQuizError(errMsg);
+      toast.error(errMsg);
     } finally {
       setQuizLoading(false);
     }
@@ -567,8 +914,11 @@ const StudySubject: React.FC = () => {
         setBadgeModal({ show: true, badges: data.newBadges });
         setTimeout(() => setBadgeModal(null), 4500);
       }
+      toast.success('Quiz completed successfully!');
     } catch (err: any) {
-      setQuizError(err.response?.data?.message || 'Failed to submit quiz. Please try again.');
+      const errMsg = err.response?.data?.message || 'Failed to submit quiz. Please try again.';
+      setQuizError(errMsg);
+      toast.error(errMsg);
     } finally {
       setSubmittingQuiz(false);
     }
@@ -630,7 +980,11 @@ const StudySubject: React.FC = () => {
         });
       }, 1000);
     } catch (err: any) {
-      setExamError(err.response?.data?.message || 'Failed to prepare exam. Please ensure study materials are uploaded.');
+      const errMsg = err.response?.status === 429
+        ? (err.response?.data?.message || 'You have reached the hourly limit for AI requests. Please try again later.')
+        : (err.response?.data?.message || 'Failed to prepare exam. Please ensure study materials are uploaded.');
+      setExamError(errMsg);
+      toast.error(errMsg);
     } finally {
       setExamLoading(false);
     }
@@ -702,8 +1056,11 @@ const StudySubject: React.FC = () => {
         setBadgeModal({ show: true, badges: data.newBadges });
         setTimeout(() => setBadgeModal(null), 4500);
       }
+      toast.success('Exam submitted successfully!');
     } catch (err: any) {
-      setExamError(err.response?.data?.message || 'Failed to submit exam. Please try again.');
+      const errMsg = err.response?.data?.message || 'Failed to submit exam. Please try again.';
+      setExamError(errMsg);
+      toast.error(errMsg);
     } finally {
       setSubmittingExam(false);
     }
@@ -763,6 +1120,7 @@ const StudySubject: React.FC = () => {
 
     if (minutes < 1) {
       setTimerMessage({ type: 'info', text: 'Study for at least 1 minute to log time' });
+      toast.error('Study for at least 1 minute to log time');
       return;
     }
 
@@ -773,10 +1131,14 @@ const StudySubject: React.FC = () => {
 
     try {
       await API.post(`/subjects/${subjectId}/log-time`, { minutes });
-      setTimerMessage({ type: 'success', text: `Logged ${minutes} minute${minutes > 1 ? 's' : ''} of study time!` });
+      const msg = `Logged ${minutes} minute${minutes > 1 ? 's' : ''} of study time!`;
+      setTimerMessage({ type: 'success', text: msg });
+      toast.success(msg);
       setElapsedSeconds(0);
     } catch (err: any) {
-      setTimerMessage({ type: 'error', text: err.response?.data?.message || 'Failed to log study time' });
+      const errMsg = err.response?.data?.message || 'Failed to log study time';
+      setTimerMessage({ type: 'error', text: errMsg });
+      toast.error(errMsg);
     } finally {
       setSavingTimer(false);
     }
@@ -793,10 +1155,13 @@ const StudySubject: React.FC = () => {
       const mapData = res.data.knowledgeMap;
       setKnowledgeMapData(mapData);
       setSubject((prev) => (prev ? { ...prev, knowledgeMap: mapData } : prev));
+      toast.success('Knowledge Map generated successfully!');
     } catch (err: any) {
-      setMapError(
-        err.response?.data?.message || 'Failed to generate Knowledge Map. Make sure you have uploaded study materials.'
-      );
+      const errMsg = err.response?.status === 429
+        ? (err.response?.data?.message || 'You have reached the hourly limit for AI requests. Please try again later.')
+        : (err.response?.data?.message || 'Failed to generate Knowledge Map. Make sure you have uploaded study materials.');
+      setMapError(errMsg);
+      toast.error(errMsg);
     } finally {
       setGeneratingMap(false);
     }
@@ -818,10 +1183,13 @@ const StudySubject: React.FC = () => {
       });
       setStudyPlan(res.data.plan);
       setShowPlanSetup(false);
+      toast.success('Study plan generated successfully!');
     } catch (err: any) {
-      setPlanError(
-        err.response?.data?.message || 'Failed to generate study plan. Please ensure you have generated a knowledge map.'
-      );
+      const errMsg = err.response?.status === 429
+        ? (err.response?.data?.message || 'You have reached the hourly limit for AI requests. Please try again later.')
+        : (err.response?.data?.message || 'Failed to generate study plan. Please ensure you have generated a knowledge map.');
+      setPlanError(errMsg);
+      toast.error(errMsg);
     } finally {
       setGeneratingPlan(false);
     }
@@ -1482,11 +1850,21 @@ const StudySubject: React.FC = () => {
                 ) : (
                   <div className="flex flex-col gap-2.5 max-h-[350px] overflow-y-auto pr-1" style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(168,212,220,0.2) transparent' }}>
                     {materials.map((mat) => (
-                      <div key={mat._id} className="flex items-center gap-3 p-3.5 rounded-xl transition-colors" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(168,212,220,0.08)' }}>
-                        <div className="p-2 rounded-lg bg-teal-500/10 text-[#7EC8E3]">
+                      <div key={mat._id} className="flex items-center gap-3 p-3.5 rounded-xl transition-colors group/mat" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(168,212,220,0.08)' }}>
+                        <div className="p-2 rounded-lg bg-teal-500/10 text-[#7EC8E3] shrink-0">
                           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
                         </div>
                         <span className="text-sm truncate font-medium flex-1 text-[#DAF1DE]">{mat.fileName}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteMaterial(mat._id)}
+                          title="Delete material"
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-400/10 transition-colors opacity-70 group-hover/mat:opacity-100 cursor-pointer shrink-0"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        </button>
                       </div>
                     ))}
                   </div>
@@ -1680,9 +2058,23 @@ const StudySubject: React.FC = () => {
                         )}
 
                         {isAssistantFeynman && (
-                          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold border mb-2.5 bg-amber-500/20 text-amber-300 border-amber-500/30">
-                            <span>🎓</span>
-                            <span>Feynman Feedback</span>
+                          <div className="flex items-center justify-between flex-wrap gap-2 mb-2.5">
+                            <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold border bg-amber-500/20 text-amber-300 border-amber-500/30">
+                              <span>🎓</span>
+                              <span>Feynman Feedback</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleToggleSpeak(i, msg.content)}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-semibold border flex items-center gap-1.5 transition-all cursor-pointer ${
+                                speakingMsgIndex === i
+                                  ? 'bg-amber-500/30 border-amber-400 text-amber-200 animate-pulse shadow-[0_0_12px_rgba(234,179,8,0.4)]'
+                                  : 'bg-amber-500/10 border-amber-500/20 text-amber-300 hover:bg-amber-500/20'
+                              }`}
+                            >
+                              <span>{speakingMsgIndex === i ? '🔊' : '🗣️'}</span>
+                              <span>{speakingMsgIndex === i ? 'Stop Reading' : 'Read Feedback Aloud'}</span>
+                            </button>
                           </div>
                         )}
 
@@ -1693,12 +2085,15 @@ const StudySubject: React.FC = () => {
                           </div>
                         )}
                         {msg.content}
+                        {isStreaming && i === messages.length - 1 && msg.role === 'assistant' && (
+                          <span className="inline-block w-2 h-4 ml-1 bg-[#4EC9D4] animate-pulse align-middle" style={{ borderRadius: 1 }} />
+                        )}
                       </div>
                     </div>
                   );
                 })}
 
-                {chatLoading && (
+                {chatLoading && (!isStreaming || (messages.length > 0 && messages[messages.length - 1].content === '')) && (
                   <div className="flex w-full justify-start">
                     <div className="max-w-[85%] rounded-2xl rounded-tl-xs p-4 flex items-center gap-2" style={{ backgroundColor: isFeynmanMode ? '#182210' : isConfusionMode ? '#120B24' : '#0A1A1B', border: isFeynmanMode ? '1px solid rgba(234,179,8,0.4)' : isConfusionMode ? '1px solid rgba(168,85,247,0.4)' : '1px solid rgba(168,212,220,0.15)' }}>
                       <span className="text-xs text-[#8EB69B]">{isFeynmanMode ? 'AI is evaluating your explanation against course materials...' : explainLevel !== 'normal' ? `AI is generating ${explainLevel} explanation...` : isConfusionMode ? 'AI is diagnosing missing prerequisites...' : 'AI is analyzing your materials...'}</span>
@@ -1761,7 +2156,35 @@ const StudySubject: React.FC = () => {
                         className="w-full p-4 rounded-xl text-sm placeholder-amber-400/50 focus:outline-none focus:border-amber-400 transition-colors leading-relaxed"
                       />
 
-                      <div className="flex justify-end">
+                      <div className="flex items-center justify-between flex-wrap gap-3">
+                        {/* Voice Input Button & Recording Status Indicator */}
+                        {!isSpeechRecognitionSupported ? (
+                          <span className="text-xs text-amber-400/70 italic">Voice input not supported in this browser — try Chrome or Edge</span>
+                        ) : (
+                          <div className="flex items-center gap-2.5">
+                            <button
+                              type="button"
+                              onClick={handleToggleListening}
+                              disabled={chatLoading}
+                              className={`px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer ${
+                                isListening
+                                  ? 'bg-red-500/25 border border-red-500/50 text-red-300 shadow-[0_0_15px_rgba(239,68,68,0.4)] animate-pulse'
+                                  : 'bg-amber-500/15 border border-amber-500/30 text-amber-300 hover:bg-amber-500/25 shadow-[0_0_10px_rgba(234,179,8,0.15)]'
+                              }`}
+                            >
+                              <span>{isListening ? '⏹️' : '🎙️'}</span>
+                              <span>{isListening ? 'Stop Recording' : 'Voice Input'}</span>
+                            </button>
+
+                            {isListening && (
+                              <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-red-500/15 border border-red-500/30 text-red-300 text-xs font-medium animate-pulse">
+                                <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
+                                <span>Listening... Speak your explanation</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
                         <button
                           type="submit"
                           disabled={!feynmanExplanation.trim() || chatLoading}

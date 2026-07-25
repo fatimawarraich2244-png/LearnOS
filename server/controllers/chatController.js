@@ -4,6 +4,129 @@ const ChatMessage = require('../models/ChatMessage');
 const { getEmbeddings } = require('../services/embeddings');
 const { cosineSimilarity } = require('../services/similarity');
 
+const sendSSEFallback = async (res, subjectId, userId, fallbackAns) => {
+  await ChatMessage.create({
+    subjectId,
+    userId,
+    role: 'assistant',
+    content: fallbackAns,
+  });
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.write(`data: ${JSON.stringify({ content: fallbackAns })}\n\n`);
+  res.write('data: [DONE]\n\n');
+  res.end();
+};
+
+const handleGroqStream = async ({
+  req,
+  res,
+  subjectId,
+  systemPrompt,
+  userPrompt,
+  onComplete,
+}) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+
+  try {
+    const response = await axios.post(
+      'https://api.groq.com/openai/v1/chat/completions',
+      {
+        model: 'llama-3.3-70b-versatile',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        stream: true,
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        responseType: 'stream',
+      }
+    );
+
+    let fullAnswer = '';
+    let buffer = '';
+
+    response.data.on('data', (chunk) => {
+      buffer += chunk.toString('utf8');
+      const lines = buffer.split('\n');
+      buffer = lines.pop(); // save trailing partial line in buffer
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || !trimmed.startsWith('data:')) continue;
+        if (trimmed === 'data: [DONE]') continue;
+
+        try {
+          const jsonStr = trimmed.replace(/^data:\s*/, '');
+          const parsed = JSON.parse(jsonStr);
+          const delta = parsed.choices?.[0]?.delta?.content;
+          if (delta) {
+            fullAnswer += delta;
+            res.write(`data: ${JSON.stringify({ content: delta })}\n\n`);
+          }
+        } catch (e) {
+          // ignore partial json parse error
+        }
+      }
+    });
+
+    response.data.on('end', async () => {
+      if (buffer.trim()) {
+        const trimmed = buffer.trim();
+        if (trimmed.startsWith('data:') && trimmed !== 'data: [DONE]') {
+          try {
+            const jsonStr = trimmed.replace(/^data:\s*/, '');
+            const parsed = JSON.parse(jsonStr);
+            const delta = parsed.choices?.[0]?.delta?.content;
+            if (delta) {
+              fullAnswer += delta;
+              res.write(`data: ${JSON.stringify({ content: delta })}\n\n`);
+            }
+          } catch (e) {}
+        }
+      }
+
+      if (fullAnswer) {
+        await ChatMessage.create({
+          subjectId,
+          userId: req.userId,
+          role: 'assistant',
+          content: fullAnswer,
+        });
+
+        if (onComplete) {
+          await onComplete();
+        }
+      }
+
+      res.write('data: [DONE]\n\n');
+      res.end();
+    });
+
+    response.data.on('error', (err) => {
+      console.error('Groq stream error:', err);
+      res.write('data: [DONE]\n\n');
+      res.end();
+    });
+  } catch (error) {
+    console.error('Error in Groq stream setup:', error.response?.data || error.message);
+    if (!res.headersSent) {
+      return res.status(500).json({ message: `Error generating response: ${error.message}` });
+    }
+    res.write(`data: ${JSON.stringify({ content: `Error: ${error.message}` })}\n\n`);
+    res.write('data: [DONE]\n\n');
+    res.end();
+  }
+};
+
 const askQuestion = async (req, res) => {
   try {
     const { subjectId, question } = req.body;
@@ -27,13 +150,7 @@ const askQuestion = async (req, res) => {
 
     if (!materials || materials.length === 0) {
       const fallbackAns = 'No study materials uploaded yet for this subject.';
-      await ChatMessage.create({
-        subjectId,
-        userId: req.userId,
-        role: 'assistant',
-        content: fallbackAns,
-      });
-      return res.json({ answer: fallbackAns, sourcesUsed: 0 });
+      return sendSSEFallback(res, subjectId, req.userId, fallbackAns);
     }
 
     let allChunks = [];
@@ -48,13 +165,7 @@ const askQuestion = async (req, res) => {
 
     if (allChunks.length === 0) {
       const fallbackAns = 'Study materials found, but they contain no extracted text.';
-      await ChatMessage.create({
-        subjectId,
-        userId: req.userId,
-        role: 'assistant',
-        content: fallbackAns,
-      });
-      return res.json({ answer: fallbackAns, sourcesUsed: 0 });
+      return sendSSEFallback(res, subjectId, req.userId, fallbackAns);
     }
 
     const questionEmbeddings = await getEmbeddings([question]);
@@ -75,42 +186,27 @@ const askQuestion = async (req, res) => {
     const contextText = topChunks.join('\n\n');
     const systemPrompt = `You are a helpful study assistant. Answer the student's question using ONLY the context provided below. If the answer isn't in the context, say so clearly. Context: \n${contextText}`;
 
-    const response = await axios.post(
-      'https://api.groq.com/openai/v1/chat/completions',
-      {
-        model: 'llama-3.3-70b-versatile',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: question }
-        ]
-      },
-      {
-        headers: {
-          'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
-          'Content-Type': 'application/json'
-        }
-      }
-    );
-
-    const answer = response.data.choices[0].message.content;
-
-    // Save assistant answer
-    await ChatMessage.create({
-      subjectId,
-      userId: req.userId,
-      role: 'assistant',
-      content: answer,
-    });
-
-    // Gamification Integration
     const { addXP } = require('../services/gamification');
-    await addXP(req.userId, 5);
 
-    return res.json({ answer, sourcesUsed: topChunks.length });
+    await handleGroqStream({
+      req,
+      res,
+      subjectId,
+      systemPrompt,
+      userPrompt: question,
+      onComplete: async () => {
+        await addXP(req.userId, 5);
+      },
+    });
 
   } catch (error) {
     console.error('Error in askQuestion:', error.response?.data || error.message);
-    return res.status(500).json({ message: `Error asking question: ${error.message}` });
+    if (!res.headersSent) {
+      return res.status(500).json({ message: `Error asking question: ${error.message}` });
+    }
+    res.write(`data: ${JSON.stringify({ content: `Error asking question: ${error.message}` })}\n\n`);
+    res.write('data: [DONE]\n\n');
+    res.end();
   }
 };
 
@@ -137,13 +233,7 @@ const detectConfusion = async (req, res) => {
 
     if (!materials || materials.length === 0) {
       const fallbackAns = 'No study materials uploaded yet for this subject.';
-      await ChatMessage.create({
-        subjectId,
-        userId: req.userId,
-        role: 'assistant',
-        content: fallbackAns,
-      });
-      return res.json({ answer: fallbackAns, sourcesUsed: 0 });
+      return sendSSEFallback(res, subjectId, req.userId, fallbackAns);
     }
 
     let allChunks = [];
@@ -158,13 +248,7 @@ const detectConfusion = async (req, res) => {
 
     if (allChunks.length === 0) {
       const fallbackAns = 'Study materials found, but they contain no extracted text.';
-      await ChatMessage.create({
-        subjectId,
-        userId: req.userId,
-        role: 'assistant',
-        content: fallbackAns,
-      });
-      return res.json({ answer: fallbackAns, sourcesUsed: 0 });
+      return sendSSEFallback(res, subjectId, req.userId, fallbackAns);
     }
 
     const confusedEmbeddings = await getEmbeddings([confusedTopic]);
@@ -185,38 +269,22 @@ const detectConfusion = async (req, res) => {
     const contextText = topChunks.join('\n\n');
     const systemPrompt = `You are a diagnostic learning assistant. The student says they are confused about: ${confusedTopic}. Using the context below, do NOT just explain this topic directly. Instead: 1. Identify what foundational concept or prerequisite knowledge is likely missing that's causing this confusion. 2. Briefly explain that prerequisite concept first in simple terms. 3. Then explain how that prerequisite connects to and clarifies ${confusedTopic}. Format your response with clear headers: "Likely Root Cause", "Foundation First", and "Now It Should Click". Context: \n${contextText}`;
 
-    const response = await axios.post(
-      'https://api.groq.com/openai/v1/chat/completions',
-      {
-        model: 'llama-3.3-70b-versatile',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: `I'm confused about: ${confusedTopic}` }
-        ]
-      },
-      {
-        headers: {
-          'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
-          'Content-Type': 'application/json'
-        }
-      }
-    );
-
-    const answer = response.data.choices[0].message.content;
-
-    // Save assistant answer
-    await ChatMessage.create({
+    await handleGroqStream({
+      req,
+      res,
       subjectId,
-      userId: req.userId,
-      role: 'assistant',
-      content: answer,
+      systemPrompt,
+      userPrompt: `I'm confused about: ${confusedTopic}`,
     });
-
-    return res.json({ answer, sourcesUsed: topChunks.length });
 
   } catch (error) {
     console.error('Error in detectConfusion:', error.response?.data || error.message);
-    return res.status(500).json({ message: `Error detecting confusion: ${error.message}` });
+    if (!res.headersSent) {
+      return res.status(500).json({ message: `Error detecting confusion: ${error.message}` });
+    }
+    res.write(`data: ${JSON.stringify({ content: `Error detecting confusion: ${error.message}` })}\n\n`);
+    res.write('data: [DONE]\n\n');
+    res.end();
   }
 };
 
@@ -253,13 +321,7 @@ const explainAtLevel = async (req, res) => {
 
     if (!materials || materials.length === 0) {
       const fallbackAns = 'No study materials uploaded yet for this subject.';
-      await ChatMessage.create({
-        subjectId,
-        userId: req.userId,
-        role: 'assistant',
-        content: fallbackAns,
-      });
-      return res.json({ answer: fallbackAns, sourcesUsed: 0 });
+      return sendSSEFallback(res, subjectId, req.userId, fallbackAns);
     }
 
     let allChunks = [];
@@ -274,13 +336,7 @@ const explainAtLevel = async (req, res) => {
 
     if (allChunks.length === 0) {
       const fallbackAns = 'Study materials found, but they contain no extracted text.';
-      await ChatMessage.create({
-        subjectId,
-        userId: req.userId,
-        role: 'assistant',
-        content: fallbackAns,
-      });
-      return res.json({ answer: fallbackAns, sourcesUsed: 0 });
+      return sendSSEFallback(res, subjectId, req.userId, fallbackAns);
     }
 
     const topicEmbeddings = await getEmbeddings([topic]);
@@ -301,38 +357,22 @@ const explainAtLevel = async (req, res) => {
     const contextText = topChunks.join('\n\n');
     const systemPrompt = `${selectedPromptInstruction}. Answer the student's request about "${topic}" using the context provided below. Context: \n${contextText}`;
 
-    const response = await axios.post(
-      'https://api.groq.com/openai/v1/chat/completions',
-      {
-        model: 'llama-3.3-70b-versatile',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: `Explain ${topic} at ${level} level` }
-        ]
-      },
-      {
-        headers: {
-          'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
-          'Content-Type': 'application/json'
-        }
-      }
-    );
-
-    const answer = response.data.choices[0].message.content;
-
-    // Save assistant answer
-    await ChatMessage.create({
+    await handleGroqStream({
+      req,
+      res,
       subjectId,
-      userId: req.userId,
-      role: 'assistant',
-      content: answer,
+      systemPrompt,
+      userPrompt: `Explain ${topic} at ${level} level`,
     });
-
-    return res.json({ answer, sourcesUsed: topChunks.length });
 
   } catch (error) {
     console.error('Error in explainAtLevel:', error.response?.data || error.message);
-    return res.status(500).json({ message: `Error explaining topic: ${error.message}` });
+    if (!res.headersSent) {
+      return res.status(500).json({ message: `Error explaining topic: ${error.message}` });
+    }
+    res.write(`data: ${JSON.stringify({ content: `Error explaining topic: ${error.message}` })}\n\n`);
+    res.write('data: [DONE]\n\n');
+    res.end();
   }
 };
 
@@ -362,13 +402,7 @@ const feynmanFeedback = async (req, res) => {
 
     if (!materials || materials.length === 0) {
       const fallbackAns = 'No study materials uploaded yet for this subject to evaluate your explanation.';
-      await ChatMessage.create({
-        subjectId,
-        userId: req.userId,
-        role: 'assistant',
-        content: fallbackAns,
-      });
-      return res.json({ answer: fallbackAns, sourcesUsed: 0 });
+      return sendSSEFallback(res, subjectId, req.userId, fallbackAns);
     }
 
     let allChunks = [];
@@ -383,13 +417,7 @@ const feynmanFeedback = async (req, res) => {
 
     if (allChunks.length === 0) {
       const fallbackAns = 'Study materials found, but they contain no extracted text.';
-      await ChatMessage.create({
-        subjectId,
-        userId: req.userId,
-        role: 'assistant',
-        content: fallbackAns,
-      });
-      return res.json({ answer: fallbackAns, sourcesUsed: 0 });
+      return sendSSEFallback(res, subjectId, req.userId, fallbackAns);
     }
 
     const topicEmbeddings = await getEmbeddings([topic]);
@@ -410,38 +438,22 @@ const feynmanFeedback = async (req, res) => {
     const contextText = topChunks.join('\n\n');
     const systemPrompt = `You are evaluating a student's explanation of a concept using the Feynman technique. The student is trying to explain: ${topic}. Their explanation is: ${studentExplanation}. Using the reference material as ground truth, evaluate their explanation and respond with these sections: "What You Got Right" (specific things they explained correctly), "Missing Pieces" (important aspects they left out or got wrong), "Clarity Score" (a number out of 10 with brief reasoning), "Try Again?" (one specific suggestion to improve their explanation). Be encouraging but honest. Reference material: \n${contextText}`;
 
-    const response = await axios.post(
-      'https://api.groq.com/openai/v1/chat/completions',
-      {
-        model: 'llama-3.3-70b-versatile',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userContent }
-        ]
-      },
-      {
-        headers: {
-          'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
-          'Content-Type': 'application/json'
-        }
-      }
-    );
-
-    const answer = response.data.choices[0].message.content;
-
-    // Save assistant answer
-    await ChatMessage.create({
+    await handleGroqStream({
+      req,
+      res,
       subjectId,
-      userId: req.userId,
-      role: 'assistant',
-      content: answer,
+      systemPrompt,
+      userPrompt: userContent,
     });
-
-    return res.json({ answer, sourcesUsed: topChunks.length });
 
   } catch (error) {
     console.error('Error in feynmanFeedback:', error.response?.data || error.message);
-    return res.status(500).json({ message: `Error evaluating explanation: ${error.message}` });
+    if (!res.headersSent) {
+      return res.status(500).json({ message: `Error evaluating explanation: ${error.message}` });
+    }
+    res.write(`data: ${JSON.stringify({ content: `Error evaluating explanation: ${error.message}` })}\n\n`);
+    res.write('data: [DONE]\n\n');
+    res.end();
   }
 };
 

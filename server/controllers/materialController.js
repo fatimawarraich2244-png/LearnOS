@@ -75,7 +75,40 @@ const getMaterialsBySubject = async (req, res) => {
   }
 };
 
+const deleteMaterial = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const material = await Material.findById(id);
+
+    if (!material) {
+      return res.status(404).json({ message: 'Material not found' });
+    }
+
+    if (material.userId.toString() !== req.userId) {
+      return res.status(403).json({ message: 'Not authorized' });
+    }
+
+    if (material.filePath) {
+      try {
+        if (fs.existsSync(material.filePath)) {
+          fs.unlinkSync(material.filePath);
+        }
+      } catch (err) {
+        console.error('Error unlinking file:', err);
+      }
+    }
+
+    await material.deleteOne();
+
+    return res.json({ message: 'Material deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting material:', error);
+    return res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
   uploadMaterial,
   getMaterialsBySubject,
+  deleteMaterial,
 };

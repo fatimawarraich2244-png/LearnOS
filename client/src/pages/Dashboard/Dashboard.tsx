@@ -4,6 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 // @ts-ignore
 import API from '../../api/axios';
 import logo from '../../assets/logo.png';
+import toast from 'react-hot-toast';
 
 interface Semester {
   _id: string;
@@ -155,12 +156,34 @@ const IconBadge = ({ children, bg, glow, color, size = 52 }: { children: React.R
 );
 
 /* ─── Dashboard ──────────────────────────────────────────────── */
+const GENERIC_MOTIVATIONS = [
+  'Consistency beats intensity — keep going!',
+  'Every expert was once a beginner.',
+  'Small steps every day lead to big achievements.',
+  'Your future self will thank you for studying today.',
+];
+
 const Dashboard: React.FC = () => {
   const [semesters, setSemesters] = useState<Semester[]>([]);
   const [newSemester, setNewSemester] = useState('');
   const [loading, setLoading] = useState(true);
   const [addLoading, setAddLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [onboardingDismissed, setOnboardingDismissed] = useState<boolean>(
+    () => localStorage.getItem('onboarding_dismissed') === 'true'
+  );
+  const [genericMsgIdx, setGenericMsgIdx] = useState<number>(0);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setGenericMsgIdx((prev) => (prev + 1) % GENERIC_MOTIVATIONS.length);
+    }, 8000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const handleDismissOnboarding = () => {
+    localStorage.setItem('onboarding_dismissed', 'true');
+    setOnboardingDismissed(true);
+  };
 
   // Dashboard Stat card stats
   const [stats, setStats] = useState<DashboardStats>({
@@ -199,7 +222,7 @@ const Dashboard: React.FC = () => {
         const res = await API.get('/semesters');
         setSemesters(res.data);
       } catch (err: any) {
-        setError('Failed to fetch semesters');
+        toast.error('Failed to fetch semesters');
       } finally {
         setLoading(false);
       }
@@ -287,8 +310,9 @@ const Dashboard: React.FC = () => {
       const res = await API.post('/semesters', { name: newSemester.trim() });
       setSemesters((prev) => [...prev, res.data]);
       setNewSemester('');
+      toast.success('Semester created successfully!');
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to add semester');
+      toast.error(err.response?.data?.message || 'Failed to add semester');
     } finally {
       setAddLoading(false);
     }
@@ -309,8 +333,9 @@ const Dashboard: React.FC = () => {
       setExamNameInput('');
       setExamDateInput('');
       setExamSubjectId('');
+      toast.success('Exam added successfully!');
     } catch (err: any) {
-      console.error('Failed to create exam:', err);
+      toast.error(err.response?.data?.message || 'Failed to create exam');
     } finally {
       setCreatingExam(false);
     }
@@ -426,8 +451,6 @@ const Dashboard: React.FC = () => {
             </button>
           </form>
 
-          {error && <p className="text-red-400 text-sm bg-red-400/10 border border-red-400/20 rounded-xl px-4 py-2">{error}</p>}
-
           {/* Semester grid */}
           {loading ? (
             <div className="flex justify-center py-12">
@@ -504,6 +527,124 @@ const Dashboard: React.FC = () => {
               <span>View Full Report →</span>
             </Link>
           </div>
+
+          {/* ── Motivational Message Banner ── */}
+          {(() => {
+            let text = GENERIC_MOTIVATIONS[genericMsgIdx];
+            let isGold = false;
+
+            if (userStats && userStats.currentStreak > 0) {
+              text = `🔥 Keep your ${userStats.currentStreak}-day streak alive!`;
+              isGold = true;
+            } else if (stats.weakSubjects && stats.weakSubjects.length > 0) {
+              text = `Your ${stats.weakSubjects[0].name} needs attention — a quick quiz could help`;
+              isGold = false;
+            } else {
+              const hasActivityToday = activities.some((a) => {
+                if (!a.date) return false;
+                const actDate = new Date(a.date);
+                const today = new Date();
+                return (
+                  actDate.getFullYear() === today.getFullYear() &&
+                  actDate.getMonth() === today.getMonth() &&
+                  actDate.getDate() === today.getDate()
+                );
+              });
+              if (!hasActivityToday) {
+                text = "You haven't studied today — even 10 minutes helps!";
+                isGold = true;
+              }
+            }
+
+            return (
+              <div
+                className="flex items-center gap-3 px-4 py-2.5 rounded-2xl border transition-all duration-300"
+                style={{
+                  background: isGold
+                    ? 'linear-gradient(90deg, rgba(245,158,11,0.12) 0%, rgba(217,119,6,0.06) 100%)'
+                    : 'linear-gradient(90deg, rgba(78,201,212,0.12) 0%, rgba(14,116,144,0.06) 100%)',
+                  borderColor: isGold ? 'rgba(245,158,11,0.35)' : 'rgba(78,201,212,0.35)',
+                  boxShadow: isGold ? '0 0 15px rgba(245,158,11,0.08)' : '0 0 15px rgba(78,201,212,0.08)',
+                }}
+              >
+                <span className="text-[#DAF1DE] font-semibold text-xs flex items-center gap-2">
+                  <span className="text-sm">{isGold ? '✨' : '💡'}</span>
+                  <span style={{ color: isGold ? '#FBBF24' : '#4EC9D4' }}>{text}</span>
+                </span>
+              </div>
+            );
+          })()}
+
+          {/* ── Onboarding Welcome Banner ── */}
+          {!loading && !onboardingDismissed && semesters.length === 0 && (userStats === null || userStats.xp === 0) && (
+            <div
+              className="relative p-[1px] rounded-3xl transition-all duration-300"
+              style={{
+                background: 'linear-gradient(135deg, #4EC9D4 0%, #B8A0E8 50%, #F59E0B 100%)',
+                boxShadow: '0 0 30px rgba(78,201,212,0.15)',
+              }}
+            >
+              <div
+                className="rounded-[23px] p-6 md:p-7 flex flex-col gap-5 relative overflow-hidden"
+                style={{ background: 'linear-gradient(145deg, #091a1e 0%, #0c1424 100%)' }}
+              >
+                {/* Header Row */}
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-2xl flex items-center justify-center text-xl shrink-0" style={{ background: 'linear-gradient(135deg, rgba(78,201,212,0.2), rgba(184,160,232,0.2))', border: '1px solid rgba(168,212,220,0.3)' }}>
+                      🚀
+                    </div>
+                    <div>
+                      <h3 className="font-jakarta font-bold text-lg text-[#DAF1DE]">Welcome to LearnOS!</h3>
+                      <p className="text-xs text-[#8EB69B]">Get started with your AI-powered study workspace in 3 steps:</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleDismissOnboarding}
+                    title="Dismiss welcome banner"
+                    className="p-1.5 rounded-xl text-[#8EB69B] hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+                  >
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+
+                {/* 3 Steps */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-1">
+                  <div className="flex items-start gap-3 p-4 rounded-2xl bg-white/[0.03] border border-white/10 hover:border-teal-400/40 transition-colors">
+                    <span className="w-7 h-7 rounded-xl flex items-center justify-center font-jakarta font-bold text-xs shrink-0" style={{ background: 'linear-gradient(135deg, #4EC9D4, #2563eb)', color: '#040D0E' }}>
+                      1
+                    </span>
+                    <div className="flex flex-col">
+                      <span className="font-semibold text-xs text-[#DAF1DE]">1. Create a semester and add a subject</span>
+                      <span className="text-[11px] text-[#8EB69B] mt-0.5">Organize your courses & modules.</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3 p-4 rounded-2xl bg-white/[0.03] border border-white/10 hover:border-teal-400/40 transition-colors">
+                    <span className="w-7 h-7 rounded-xl flex items-center justify-center font-jakarta font-bold text-xs shrink-0" style={{ background: 'linear-gradient(135deg, #B8A0E8, #7C85C2)', color: '#040D0E' }}>
+                      2
+                    </span>
+                    <div className="flex flex-col">
+                      <span className="font-semibold text-xs text-[#DAF1DE]">2. Upload your study materials (PDF/DOCX)</span>
+                      <span className="text-[11px] text-[#8EB69B] mt-0.5">Parse & index notes automatically.</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3 p-4 rounded-2xl bg-white/[0.03] border border-white/10 hover:border-teal-400/40 transition-colors">
+                    <span className="w-7 h-7 rounded-xl flex items-center justify-center font-jakarta font-bold text-xs shrink-0" style={{ background: 'linear-gradient(135deg, #F59E0B, #D97706)', color: '#040D0E' }}>
+                      3
+                    </span>
+                    <div className="flex flex-col">
+                      <span className="font-semibold text-xs text-[#DAF1DE]">3. Start chatting, quizzing, and tracking progress</span>
+                      <span className="text-[11px] text-[#8EB69B] mt-0.5">Master topics with instant AI feedback.</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* ── Gamification Banner & Badges Card ── */}
           <div
