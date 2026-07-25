@@ -102,6 +102,10 @@ const askQuestion = async (req, res) => {
       content: answer,
     });
 
+    // Gamification Integration
+    const { addXP } = require('../services/gamification');
+    await addXP(req.userId, 5);
+
     return res.json({ answer, sourcesUsed: topChunks.length });
 
   } catch (error) {

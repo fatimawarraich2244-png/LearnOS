@@ -19,6 +19,18 @@ interface BrainData {
   updatedAt?: string;
 }
 
+interface DNAPattern {
+  insight: string;
+  confidence: 'high' | 'medium' | string;
+  category: 'time' | 'technique' | 'engagement' | string;
+}
+
+interface LearningDNAResult {
+  patterns: DNAPattern[];
+  dataPoints: number;
+  lastAnalyzed?: string;
+}
+
 const GlobalBrainPage: React.FC = () => {
   const { logoutUser } = useAuth();
 
@@ -28,12 +40,18 @@ const GlobalBrainPage: React.FC = () => {
   const [error, setError] = useState('');
   const [insufficientData, setInsufficientData] = useState(false);
 
+  // Learning DNA State
+  const [learningDNA, setLearningDNA] = useState<LearningDNAResult | null>(null);
+  const [dnaLoading, setDnaLoading] = useState(true);
+  const [dnaAnalyzing, setDnaAnalyzing] = useState(false);
+  const [dnaMessage, setDnaMessage] = useState('');
+
   const hasData =
     brainData &&
     ((brainData.weakConcepts && brainData.weakConcepts.length > 0) ||
       (brainData.strongConcepts && brainData.strongConcepts.length > 0));
 
-  // Fetch existing brain data on mount
+  // Fetch existing brain data and Learning DNA on mount
   useEffect(() => {
     const fetchBrain = async () => {
       try {
@@ -48,7 +66,25 @@ const GlobalBrainPage: React.FC = () => {
       }
     };
 
+    const fetchDNA = async () => {
+      try {
+        const res = await API.get('/stats/learning-dna');
+        if (res.data?.message && !res.data.learningDNA?.patterns?.length) {
+          setDnaMessage(res.data.message);
+          setLearningDNA(null);
+        } else if (res.data?.learningDNA) {
+          setLearningDNA(res.data.learningDNA);
+          setDnaMessage('');
+        }
+      } catch (err) {
+        console.error('Failed to fetch Learning DNA', err);
+      } finally {
+        setDnaLoading(false);
+      }
+    };
+
     fetchBrain();
+    fetchDNA();
   }, []);
 
   const handleAnalyze = async () => {
@@ -68,6 +104,25 @@ const GlobalBrainPage: React.FC = () => {
       }
     } finally {
       setAnalyzing(false);
+    }
+  };
+
+  const handleAnalyzeDNA = async () => {
+    setDnaAnalyzing(true);
+    setDnaMessage('');
+    try {
+      const res = await API.post('/stats/learning-dna');
+      if (res.data.message && !res.data.learningDNA?.patterns?.length) {
+        setDnaMessage(res.data.message);
+        setLearningDNA(null);
+      } else if (res.data.learningDNA) {
+        setLearningDNA(res.data.learningDNA);
+        setDnaMessage('');
+      }
+    } catch (err: any) {
+      setDnaMessage(err.response?.data?.message || 'Failed to analyze Learning DNA.');
+    } finally {
+      setDnaAnalyzing(false);
     }
   };
 
@@ -427,10 +482,205 @@ const GlobalBrainPage: React.FC = () => {
                     </div>
                   ))}
                 </div>
+              {/* ── STRONG CONCEPTS END ── */}
               </div>
             )}
           </div>
         )}
+
+        {/* ─── SECTION: YOUR LEARNING DNA (GOLD / AMBER ACCENT) ────────────────── */}
+        <div
+          style={{
+            background: 'linear-gradient(145deg, #181409 0%, #101524 100%)',
+            border: '1px solid rgba(251,191,36,0.25)',
+            boxShadow: '0 0 35px rgba(251,191,36,0.06)',
+          }}
+          className="rounded-3xl p-8 flex flex-col gap-6 w-full"
+        >
+          {/* Section Header */}
+          <div className="flex items-center justify-between flex-wrap gap-4 pb-4 border-b border-amber-500/15">
+            <div className="flex items-center gap-3">
+              <div
+                style={{
+                  width: 44,
+                  height: 44,
+                  background: 'linear-gradient(135deg, #452c03 0%, #784c06 100%)',
+                  borderRadius: '50%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#FBBF24',
+                  boxShadow: '0 0 20px rgba(251,191,36,0.3)',
+                }}
+              >
+                <span className="text-xl">🧬</span>
+              </div>
+              <div>
+                <h2 className="font-jakarta font-bold text-2xl" style={{ background: 'linear-gradient(90deg, #DAF1DE 0%, #FBBF24 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+                  Your Learning DNA
+                </h2>
+                <p className="text-xs text-[#8EB69B]">Personalized insights about how YOU learn best</p>
+              </div>
+            </div>
+
+            {/* Re-analyze Button */}
+            {learningDNA && learningDNA.patterns && learningDNA.patterns.length > 0 && (
+              <button
+                onClick={handleAnalyzeDNA}
+                disabled={dnaAnalyzing}
+                className="px-5 py-2.5 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer border disabled:opacity-50 hover:scale-105 active:scale-95"
+                style={{
+                  background: 'linear-gradient(135deg, #452c03 0%, #784c06 100%)',
+                  border: '1px solid rgba(251,191,36,0.4)',
+                  color: '#FBBF24',
+                  boxShadow: '0 0 15px rgba(251,191,36,0.2)',
+                }}
+              >
+                {dnaAnalyzing ? (
+                  <>
+                    <svg className="animate-spin h-4 w-4 text-amber-300" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/></svg>
+                    <span>Analyzing study patterns...</span>
+                  </>
+                ) : (
+                  <>
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                    <span>Re-analyze</span>
+                  </>
+                )}
+              </button>
+            )}
+          </div>
+
+          {/* DNA Content */}
+          {dnaLoading || dnaAnalyzing ? (
+            <div className="flex flex-col items-center justify-center p-12 rounded-3xl text-center gap-4 border border-dashed border-amber-500/20 bg-[#0c101a]/60 min-h-[220px]">
+              <svg className="animate-spin h-8 w-8 text-amber-400" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              </svg>
+              <span className="text-sm font-semibold text-amber-200">Analyzing your study patterns...</span>
+            </div>
+          ) : dnaMessage ? (
+            /* Insufficient Data State */
+            <div className="flex flex-col items-center justify-center p-10 rounded-3xl border border-dashed border-amber-500/30 text-center gap-4 bg-amber-500/5">
+              <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 text-3xl shadow-lg">
+                🌱
+              </div>
+              <div className="flex flex-col gap-1 max-w-md">
+                <p className="text-sm font-bold text-amber-200 leading-relaxed">{dnaMessage}</p>
+                <p className="text-xs text-[#8EB69B]">Complete more quizzes, ask questions in chat, and use Feynman mode to unlock your DNA profile!</p>
+              </div>
+              <button
+                onClick={handleAnalyzeDNA}
+                className="mt-2 px-6 py-3 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer hover:shadow-lg hover:scale-105 active:scale-95"
+                style={{
+                  background: 'linear-gradient(135deg, #FBBF24 0%, #d97706 100%)',
+                  color: '#060E10',
+                  boxShadow: '0 0 20px rgba(251,191,36,0.3)',
+                }}
+              >
+                <span>Discover My Learning DNA</span>
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+              </button>
+            </div>
+          ) : !learningDNA || !learningDNA.patterns || learningDNA.patterns.length === 0 ? (
+            /* No DNA Analysis Yet / Null State */
+            <div className="flex flex-col items-center justify-center p-12 rounded-3xl text-center gap-5 border border-dashed border-amber-500/20 bg-[#0c101a]">
+              <div className="w-16 h-16 rounded-3xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 text-3xl shadow-[0_0_20px_rgba(251,191,36,0.15)]">
+                🧬
+              </div>
+              <div className="flex flex-col gap-1.5 max-w-md">
+                <h3 className="font-jakarta font-bold text-xl text-[#DAF1DE]">Discover Your Learning DNA</h3>
+                <p className="text-xs text-[#8EB69B] leading-relaxed">
+                  AI analyzes your study times, pre-quiz preparation methods, and performance trends to reveal how you learn best.
+                </p>
+              </div>
+              <button
+                onClick={handleAnalyzeDNA}
+                className="mt-2 px-7 py-3.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer hover:shadow-xl hover:scale-105 active:scale-95"
+                style={{
+                  background: 'linear-gradient(135deg, #FBBF24 0%, #d97706 100%)',
+                  color: '#060E10',
+                  boxShadow: '0 0 20px rgba(251,191,36,0.3)',
+                }}
+              >
+                <span>Discover My Learning DNA</span>
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+              </button>
+            </div>
+          ) : (
+            /* Patterns Display */
+            <div className="flex flex-col gap-5">
+              <div className="flex items-center justify-between text-xs text-[#8EB69B]">
+                <span className="font-medium">Based on {learningDNA.dataPoints} study session{learningDNA.dataPoints !== 1 ? 's' : ''} analyzed</span>
+                {learningDNA.lastAnalyzed && (
+                  <span className="text-[11px] text-[#4a7a68]">Last updated: {new Date(learningDNA.lastAnalyzed).toLocaleDateString()}</span>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                {learningDNA.patterns.map((p, idx) => {
+                  const cat = (p.category || '').toLowerCase();
+                  const isTime = cat.includes('time') || cat.includes('clock');
+                  const isMethod = cat.includes('method') || cat.includes('technique') || cat.includes('book');
+
+                  const isHigh = (p.confidence || '').toLowerCase() === 'high';
+
+                  return (
+                    <div
+                      key={idx}
+                      className="p-6 rounded-3xl flex flex-col justify-between gap-5 transition-all hover:scale-[1.01]"
+                      style={{
+                        backgroundColor: 'rgba(10, 16, 26, 0.85)',
+                        border: '1px solid rgba(251,191,36,0.2)',
+                        boxShadow: '0 0 20px rgba(251,191,36,0.04)',
+                      }}
+                    >
+                      <div className="flex items-start gap-4">
+                        <div className="w-10 h-10 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0 text-amber-400">
+                          {isTime ? (
+                            /* Clock icon for time-based */
+                            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                          ) : isMethod ? (
+                            /* Book icon for method-based / technique */
+                            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                            </svg>
+                          ) : (
+                            /* Lightbulb icon for general */
+                            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                            </svg>
+                          )}
+                        </div>
+                        <p className="font-jakarta font-medium text-sm text-[#DAF1DE] leading-relaxed pt-1">
+                          {p.insight}
+                        </p>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-3 border-t border-white/5 text-xs">
+                        <span className="text-[#8EB69B] uppercase text-[10px] font-bold tracking-wider">
+                          {p.category}
+                        </span>
+                        <span
+                          className={`px-3 py-1 rounded-full text-[10px] uppercase font-bold tracking-wider transition-colors ${
+                            isHigh
+                              ? 'bg-teal-500 text-[#060E10] shadow-[0_0_10px_rgba(78,201,212,0.3)]'
+                              : 'border border-teal-500/40 text-teal-300 bg-transparent'
+                          }`}
+                        >
+                          {isHigh ? 'High Confidence' : 'Medium Confidence'}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

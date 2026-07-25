@@ -7,6 +7,7 @@ import Dashboard from './pages/Dashboard/Dashboard';
 import SubjectPage from './pages/Subject/SubjectPage';
 import StudySubject from './pages/Subject/StudySubject';
 import GlobalBrainPage from './pages/Brain/GlobalBrain';
+import ProgressReport from './pages/Reports/ProgressReport';
 
 interface PrivateRouteProps {
   children: React.ReactNode;
@@ -45,6 +46,14 @@ function App() {
           element={
             <PrivateRoute>
               <Dashboard />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/reports"
+          element={
+            <PrivateRoute>
+              <ProgressReport />
             </PrivateRoute>
           }
         />

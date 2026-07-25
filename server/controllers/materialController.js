@@ -51,6 +51,11 @@ const uploadMaterial = async (req, res) => {
       embedded: true,
     });
 
+    // Gamification Integration
+    const { addXP, updateStreak } = require('../services/gamification');
+    await addXP(req.userId, 10);
+    await updateStreak(req.userId);
+
     return res.status(201).json(material);
   } catch (error) {
     console.error(error);

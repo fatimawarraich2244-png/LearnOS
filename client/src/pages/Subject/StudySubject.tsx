@@ -4,6 +4,7 @@ import { useParams, Link, useLocation } from 'react-router-dom';
 import API from '../../api/axios';
 import { useAuth } from '../../context/AuthContext';
 import logo from '../../assets/logo.png';
+import confetti from 'canvas-confetti';
 
 interface TopicItem {
   name: string;
@@ -48,6 +49,18 @@ interface QuizResultItem {
   correctAnswer: string;
   isCorrect: boolean;
   explanation: string;
+}
+
+interface QuizHistoryItem {
+  _id: string;
+  score: number;
+  difficulty: string;
+  examMode: boolean;
+  timeTakenSeconds?: number;
+  topic?: string;
+  questions: QuizQuestion[];
+  takenAt: string;
+  createdAt?: string;
 }
 
 interface QuizResultsData {
@@ -104,6 +117,7 @@ const StudySubject: React.FC = () => {
 
   // Quiz state
   const [quizDifficulty, setQuizDifficulty] = useState<'easy' | 'medium' | 'hard'>('medium');
+  const [selectedQuizTopic, setSelectedQuizTopic] = useState('');
   const [quizViewMode, setQuizViewMode] = useState<QuizViewMode>('setup');
   const [quizLoading, setQuizLoading] = useState(false);
   const [quizError, setQuizError] = useState('');
@@ -115,6 +129,7 @@ const StudySubject: React.FC = () => {
   // Exam Simulator state
   type ExamViewMode = 'setup' | 'taking' | 'results';
   const [examDifficulty, setExamDifficulty] = useState<'easy' | 'medium' | 'hard'>('medium');
+  const [selectedExamTopic, setSelectedExamTopic] = useState('');
   const [examViewMode, setExamViewMode] = useState<ExamViewMode>('setup');
   const [examLoading, setExamLoading] = useState(false);
   const [examError, setExamError] = useState('');
@@ -128,6 +143,75 @@ const StudySubject: React.FC = () => {
   const examTimerIntervalRef = useRef<any>(null);
   const examUserAnswersRef = useRef<string[]>([]);
   const examRemainingSecondsRef = useRef<number>(20 * 60);
+
+  // Quiz History state
+  const [quizHistory, setQuizHistory] = useState<QuizHistoryItem[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [showQuizHistory, setShowQuizHistory] = useState(false);
+  const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null);
+
+  // Gamification Celebration State
+  const [xpPopups, setXpPopups] = useState<Array<{ id: number; amount: number }>>([]);
+  const [levelUpModal, setLevelUpModal] = useState<{ show: boolean; level: number } | null>(null);
+  const [badgeModal, setBadgeModal] = useState<{ show: boolean; badges: string[] } | null>(null);
+  const [perfectScoreToast, setPerfectScoreToast] = useState(false);
+
+  const BADGE_MAP: Record<string, { name: string; emoji: string }> = {
+    first_quiz: { name: 'First Steps', emoji: '🎯' },
+    quiz_master: { name: 'Quiz Master', emoji: '🏆' },
+    week_streak: { name: 'Week Warrior', emoji: '🔥' },
+    knowledge_seeker: { name: 'Knowledge Seeker', emoji: '🧠' },
+    perfect_score: { name: 'Perfectionist', emoji: '💯' },
+    night_owl: { name: 'Night Owl', emoji: '🦉' },
+  };
+
+  const triggerXpGain = (amount: number) => {
+    const id = Date.now() + Math.random();
+    setXpPopups((prev) => [...prev, { id, amount }]);
+    setTimeout(() => {
+      setXpPopups((prev) => prev.filter((p) => p.id !== id));
+    }, 2200);
+  };
+
+  const triggerConfetti = () => {
+    try {
+      confetti({
+        particleCount: 90,
+        spread: 70,
+        origin: { y: 0.6 },
+      });
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const triggerPerfectScoreConfetti = () => {
+    try {
+      const end = Date.now() + 1500;
+      const colors = ['#4EC9D4', '#DAF1DE', '#fbbf24', '#f43f5e'];
+      (function frame() {
+        confetti({
+          particleCount: 6,
+          angle: 60,
+          spread: 60,
+          origin: { x: 0 },
+          colors,
+        });
+        confetti({
+          particleCount: 6,
+          angle: 120,
+          spread: 60,
+          origin: { x: 1 },
+          colors,
+        });
+        if (Date.now() < end) {
+          requestAnimationFrame(frame);
+        }
+      })();
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
   // Study Timer state
   const [isTimerRunning, setIsTimerRunning] = useState(false);
@@ -231,20 +315,34 @@ const StudySubject: React.FC = () => {
     fetchMaterials();
   }, [subjectId]);
 
-  // Fetch chat history for subject
+  // Fetch Chat & Quiz History
   useEffect(() => {
     const fetchChatHistory = async () => {
       if (!subjectId) return;
       try {
         const res = await API.get(`/chat/${subjectId}`);
         setMessages(res.data);
-      } catch (err) {
+      } catch (err: any) {
         console.error('Failed to fetch chat history', err);
       }
     };
 
     fetchChatHistory();
+    fetchQuizHistory();
   }, [subjectId]);
+
+  const fetchQuizHistory = async () => {
+    if (!subjectId) return;
+    setHistoryLoading(true);
+    try {
+      const res = await API.get(`/quiz/history/${subjectId}`);
+      setQuizHistory(res.data);
+    } catch (err: any) {
+      console.error('Failed to fetch quiz history:', err);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
 
 
   // File upload handler
@@ -263,6 +361,7 @@ const StudySubject: React.FC = () => {
       const res = await API.post('/materials/upload', formData);
       setUploadStatus({ type: 'success', message: `Successfully uploaded: ${file.name}` });
       setMaterials((prev) => [res.data, ...prev]);
+      triggerXpGain(10);
     } catch (err: any) {
       setUploadStatus({ type: 'error', message: err.response?.data?.message || 'Upload failed' });
     } finally {
@@ -305,6 +404,7 @@ const StudySubject: React.FC = () => {
 
       const res = await API.post(endpoint, payload);
       setMessages((prev) => [...prev, { role: 'assistant', content: res.data.answer }]);
+      triggerXpGain(5);
     } catch (err: any) {
       setMessages((prev) => [
         ...prev,
@@ -369,6 +469,27 @@ const StudySubject: React.FC = () => {
     }
   };
 
+  const getKnowledgeMapTopicOptions = () => {
+    const map = subject?.knowledgeMap || initialSubject?.knowledgeMap;
+    if (!map || !map.topics || !Array.isArray(map.topics) || map.topics.length === 0) {
+      return [];
+    }
+    const list: string[] = [];
+    map.topics.forEach((t) => {
+      if (t.name && !list.includes(t.name)) {
+        list.push(t.name);
+      }
+      if (t.subtopics && Array.isArray(t.subtopics)) {
+        t.subtopics.forEach((st) => {
+          if (st && !list.includes(st)) {
+            list.push(st);
+          }
+        });
+      }
+    });
+    return list;
+  };
+
   // Generate Quiz handler
   const handleGenerateQuiz = async () => {
     if (!subjectId) return;
@@ -376,7 +497,11 @@ const StudySubject: React.FC = () => {
     setQuizError('');
 
     try {
-      const res = await API.post('/quiz/generate', { subjectId, difficulty: quizDifficulty });
+      const payload: any = { subjectId, difficulty: quizDifficulty };
+      if (selectedQuizTopic) {
+        payload.topic = selectedQuizTopic;
+      }
+      const res = await API.post('/quiz/generate', payload);
       const questions: QuizQuestion[] = res.data.questions || [];
       setQuizQuestions(questions);
       setUserAnswers(new Array(questions.length).fill(''));
@@ -404,14 +529,44 @@ const StudySubject: React.FC = () => {
     setQuizError('');
 
     try {
-      const res = await API.post('/quiz/submit', {
+      const payload: any = {
         subjectId,
         questions: quizQuestions,
         userAnswers,
         difficulty: quizDifficulty,
-      });
-      setQuizResults(res.data);
+      };
+      if (selectedQuizTopic) {
+        payload.topic = selectedQuizTopic;
+      }
+      const res = await API.post('/quiz/submit', payload);
+      const data = res.data;
+      setQuizResults(data);
       setQuizViewMode('results');
+      fetchQuizHistory();
+
+      // Gamification Effects
+      const xp = data.xpAdded || (data.score >= 80 ? 50 : 20);
+      triggerXpGain(xp);
+
+      if (data.score === 100) {
+        setPerfectScoreToast(true);
+        triggerPerfectScoreConfetti();
+        setTimeout(() => setPerfectScoreToast(false), 4500);
+      } else if (data.leveledUp || (data.newBadges && data.newBadges.length > 0)) {
+        triggerConfetti();
+      }
+
+      if (data.leveledUp) {
+        triggerConfetti();
+        setLevelUpModal({ show: true, level: data.newLevel || 2 });
+        setTimeout(() => setLevelUpModal(null), 3500);
+      }
+
+      if (data.newBadges && data.newBadges.length > 0) {
+        triggerConfetti();
+        setBadgeModal({ show: true, badges: data.newBadges });
+        setTimeout(() => setBadgeModal(null), 4500);
+      }
     } catch (err: any) {
       setQuizError(err.response?.data?.message || 'Failed to submit quiz. Please try again.');
     } finally {
@@ -435,7 +590,11 @@ const StudySubject: React.FC = () => {
     setExamError('');
 
     try {
-      const res = await API.post('/quiz/generate-exam', { subjectId, difficulty: examDifficulty });
+      const payload: any = { subjectId, difficulty: examDifficulty };
+      if (selectedExamTopic) {
+        payload.topic = selectedExamTopic;
+      }
+      const res = await API.post('/quiz/generate-exam', payload);
       const questions: QuizQuestion[] = res.data.questions || [];
       const timeLimitMins = res.data.timeLimit || 20;
       const initialSecs = timeLimitMins * 60;
@@ -503,17 +662,46 @@ const StudySubject: React.FC = () => {
     setExamTimeTakenSeconds(timeTaken);
 
     try {
-      const res = await API.post('/quiz/submit', {
+      const payload: any = {
         subjectId,
         questions: examQuestions,
         userAnswers: answersToSubmit,
         difficulty: examDifficulty,
         examMode: true,
         timeTakenSeconds: timeTaken,
-      });
-
-      setExamResults(res.data);
+      };
+      if (selectedExamTopic) {
+        payload.topic = selectedExamTopic;
+      }
+      const res = await API.post('/quiz/submit', payload);
+      const data = res.data;
+      setExamResults(data);
       setExamViewMode('results');
+      fetchQuizHistory();
+
+      // Gamification Effects
+      const xp = data.xpAdded || (data.score >= 80 ? 50 : 20);
+      triggerXpGain(xp);
+
+      if (data.score === 100) {
+        setPerfectScoreToast(true);
+        triggerPerfectScoreConfetti();
+        setTimeout(() => setPerfectScoreToast(false), 4500);
+      } else if (data.leveledUp || (data.newBadges && data.newBadges.length > 0)) {
+        triggerConfetti();
+      }
+
+      if (data.leveledUp) {
+        triggerConfetti();
+        setLevelUpModal({ show: true, level: data.newLevel || 2 });
+        setTimeout(() => setLevelUpModal(null), 3500);
+      }
+
+      if (data.newBadges && data.newBadges.length > 0) {
+        triggerConfetti();
+        setBadgeModal({ show: true, badges: data.newBadges });
+        setTimeout(() => setBadgeModal(null), 4500);
+      }
     } catch (err: any) {
       setExamError(err.response?.data?.message || 'Failed to submit exam. Please try again.');
     } finally {
@@ -1706,62 +1894,96 @@ const StudySubject: React.FC = () => {
           </div>
 
           {/* SETUP MODE */}
-          {quizViewMode === 'setup' && (
-            <div className="flex flex-col gap-6 my-2">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 p-6 rounded-2xl" style={{ backgroundColor: 'rgba(6, 14, 16, 0.6)', border: '1px solid rgba(168,212,220,0.08)' }}>
-                <div className="flex flex-col gap-1 max-w-md">
-                  <h3 className="font-jakarta font-semibold text-base text-[#DAF1DE]">Ready to test your knowledge?</h3>
-                  <p className="text-xs text-[#8EB69B]">Select a difficulty level and generate 5 AI-created multiple choice questions derived directly from your notes.</p>
-                </div>
+          {quizViewMode === 'setup' && (() => {
+            const topicOptions = getKnowledgeMapTopicOptions();
+            const hasMap = topicOptions.length > 0;
 
-                <div className="flex items-center gap-3 flex-wrap">
-                  {/* Difficulty selector */}
-                  <div className="flex items-center gap-2">
-                    <label htmlFor="quiz-difficulty" className="text-xs font-medium text-[#8EB69B]">Difficulty:</label>
-                    <select
-                      id="quiz-difficulty"
-                      value={quizDifficulty}
-                      onChange={(e) => setQuizDifficulty(e.target.value as 'easy' | 'medium' | 'hard')}
-                      disabled={quizLoading}
-                      style={{ backgroundColor: '#0A1A1B', border: '1px solid rgba(168,212,220,0.18)', color: '#DAF1DE' }}
-                      className="px-3.5 py-2.5 rounded-xl text-sm focus:outline-none focus:border-teal-400 cursor-pointer"
-                    >
-                      <option value="easy">Easy</option>
-                      <option value="medium">Medium</option>
-                      <option value="hard">Hard</option>
-                    </select>
+            return (
+              <div className="flex flex-col gap-6 my-2">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 p-6 rounded-2xl" style={{ backgroundColor: 'rgba(6, 14, 16, 0.6)', border: '1px solid rgba(168,212,220,0.08)' }}>
+                  <div className="flex flex-col gap-1 max-w-md">
+                    <h3 className="font-jakarta font-semibold text-base text-[#DAF1DE]">Ready to test your knowledge?</h3>
+                    <p className="text-xs text-[#8EB69B]">Select a topic and difficulty level to generate 5 AI-created multiple choice questions derived directly from your notes.</p>
                   </div>
 
-                  {/* Generate Button */}
-                  <button
-                    onClick={handleGenerateQuiz}
-                    disabled={quizLoading}
-                    className="px-6 py-2.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-50 flex items-center gap-2 cursor-pointer hover:shadow-lg"
-                    style={{ background: 'linear-gradient(135deg, #A8D4DC 0%, #4EC9D4 100%)', color: '#040D0E', boxShadow: '0 0 15px rgba(168,212,220,0.2)' }}
-                  >
-                    {quizLoading ? (
-                      <>
-                        <svg className="animate-spin h-4 w-4 text-[#040D0E]" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/></svg>
-                        <span>Generating quiz...</span>
-                      </>
-                    ) : (
-                      <>
-                        <span>Generate Quiz</span>
-                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-                      </>
-                    )}
-                  </button>
-                </div>
-              </div>
+                  <div className="flex items-center gap-3 flex-wrap">
+                    {/* Topic Selector */}
+                    <div className="flex items-center gap-2">
+                      <label htmlFor="quiz-topic" className="text-xs font-medium text-[#8EB69B]">Topic:</label>
+                      <select
+                        id="quiz-topic"
+                        value={selectedQuizTopic}
+                        onChange={(e) => setSelectedQuizTopic(e.target.value)}
+                        disabled={quizLoading || !hasMap}
+                        style={{ backgroundColor: '#0A1A1B', border: '1px solid rgba(168,212,220,0.18)', color: '#DAF1DE' }}
+                        className="px-3.5 py-2.5 rounded-xl text-sm focus:outline-none focus:border-teal-400 cursor-pointer disabled:opacity-50 max-w-[200px] truncate"
+                        title={!hasMap ? 'Generate a Knowledge Map to unlock topic-specific quizzes' : 'Filter quiz by topic'}
+                      >
+                        <option value="">All Topics (General)</option>
+                        {hasMap ? (
+                          topicOptions.map((top, idx) => (
+                            <option key={idx} value={top}>{top}</option>
+                          ))
+                        ) : (
+                          <option value="" disabled>Generate a Knowledge Map to unlock topic-specific quizzes</option>
+                        )}
+                      </select>
+                    </div>
 
-              {quizError && (
-                <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm flex items-center gap-2">
-                  <svg className="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
-                  <span>{quizError}</span>
+                    {/* Difficulty selector */}
+                    <div className="flex items-center gap-2">
+                      <label htmlFor="quiz-difficulty" className="text-xs font-medium text-[#8EB69B]">Difficulty:</label>
+                      <select
+                        id="quiz-difficulty"
+                        value={quizDifficulty}
+                        onChange={(e) => setQuizDifficulty(e.target.value as 'easy' | 'medium' | 'hard')}
+                        disabled={quizLoading}
+                        style={{ backgroundColor: '#0A1A1B', border: '1px solid rgba(168,212,220,0.18)', color: '#DAF1DE' }}
+                        className="px-3.5 py-2.5 rounded-xl text-sm focus:outline-none focus:border-teal-400 cursor-pointer"
+                      >
+                        <option value="easy">Easy</option>
+                        <option value="medium">Medium</option>
+                        <option value="hard">Hard</option>
+                      </select>
+                    </div>
+
+                    {/* Generate Button */}
+                    <button
+                      onClick={handleGenerateQuiz}
+                      disabled={quizLoading}
+                      className="px-6 py-2.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-50 flex items-center gap-2 cursor-pointer hover:shadow-lg"
+                      style={{ background: 'linear-gradient(135deg, #A8D4DC 0%, #4EC9D4 100%)', color: '#040D0E', boxShadow: '0 0 15px rgba(168,212,220,0.2)' }}
+                    >
+                      {quizLoading ? (
+                        <>
+                          <svg className="animate-spin h-4 w-4 text-[#040D0E]" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/></svg>
+                          <span>Generating quiz...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>Generate Quiz</span>
+                          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
-              )}
-            </div>
-          )}
+
+                {!hasMap && (
+                  <p className="text-xs text-amber-400/80 font-medium pl-1">
+                    💡 Note: Generate a Knowledge Map to unlock topic-specific quizzes.
+                  </p>
+                )}
+
+                {quizError && (
+                  <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm flex items-center gap-2">
+                    <svg className="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                    <span>{quizError}</span>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* TAKING MODE */}
           {quizViewMode === 'taking' && (
@@ -2011,62 +2233,96 @@ const StudySubject: React.FC = () => {
           </div>
 
           {/* SETUP MODE */}
-          {examViewMode === 'setup' && (
-            <div className="flex flex-col gap-6 my-2">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 p-6 rounded-2xl" style={{ backgroundColor: 'rgba(6, 14, 16, 0.6)', border: '1px solid rgba(244,63,94,0.15)' }}>
-                <div className="flex flex-col gap-1 max-w-md">
-                  <h3 className="font-jakarta font-semibold text-base text-[#DAF1DE]">Ready for a full Mock Exam?</h3>
-                  <p className="text-xs text-[#8EB69B]">Generate 15 comprehensive multiple-choice questions covering all uploaded study materials with a 20-minute timer limit.</p>
-                </div>
+          {examViewMode === 'setup' && (() => {
+            const topicOptions = getKnowledgeMapTopicOptions();
+            const hasMap = topicOptions.length > 0;
 
-                <div className="flex items-center gap-3 flex-wrap">
-                  {/* Difficulty Selector */}
-                  <div className="flex items-center gap-2">
-                    <label htmlFor="exam-difficulty" className="text-xs font-medium text-[#8EB69B]">Difficulty:</label>
-                    <select
-                      id="exam-difficulty"
-                      value={examDifficulty}
-                      onChange={(e) => setExamDifficulty(e.target.value as 'easy' | 'medium' | 'hard')}
-                      disabled={examLoading}
-                      style={{ backgroundColor: '#0A1A1B', border: '1px solid rgba(244,63,94,0.3)', color: '#DAF1DE' }}
-                      className="px-3.5 py-2.5 rounded-xl text-sm focus:outline-none focus:border-rose-400 cursor-pointer"
-                    >
-                      <option value="easy">Easy</option>
-                      <option value="medium">Medium</option>
-                      <option value="hard">Hard</option>
-                    </select>
+            return (
+              <div className="flex flex-col gap-6 my-2">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 p-6 rounded-2xl" style={{ backgroundColor: 'rgba(6, 14, 16, 0.6)', border: '1px solid rgba(244,63,94,0.15)' }}>
+                  <div className="flex flex-col gap-1 max-w-md">
+                    <h3 className="font-jakarta font-semibold text-base text-[#DAF1DE]">Ready for a full Mock Exam?</h3>
+                    <p className="text-xs text-[#8EB69B]">Generate 15 comprehensive multiple-choice questions covering your study materials with a 20-minute timer limit.</p>
                   </div>
 
-                  {/* Start Button */}
-                  <button
-                    onClick={handleStartExam}
-                    disabled={examLoading}
-                    className="px-6 py-2.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-50 flex items-center gap-2 cursor-pointer hover:shadow-lg"
-                    style={{ background: 'linear-gradient(135deg, #f43f5e 0%, #e11d48 100%)', color: '#ffffff', boxShadow: '0 0 15px rgba(244,63,94,0.3)' }}
-                  >
-                    {examLoading ? (
-                      <>
-                        <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/></svg>
-                        <span>Preparing your exam...</span>
-                      </>
-                    ) : (
-                      <>
-                        <span>Start Mock Exam</span>
-                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-                      </>
-                    )}
-                  </button>
-                </div>
-              </div>
+                  <div className="flex items-center gap-3 flex-wrap">
+                    {/* Topic Selector */}
+                    <div className="flex items-center gap-2">
+                      <label htmlFor="exam-topic" className="text-xs font-medium text-[#8EB69B]">Topic:</label>
+                      <select
+                        id="exam-topic"
+                        value={selectedExamTopic}
+                        onChange={(e) => setSelectedExamTopic(e.target.value)}
+                        disabled={examLoading || !hasMap}
+                        style={{ backgroundColor: '#0A1A1B', border: '1px solid rgba(244,63,94,0.3)', color: '#DAF1DE' }}
+                        className="px-3.5 py-2.5 rounded-xl text-sm focus:outline-none focus:border-rose-400 cursor-pointer disabled:opacity-50 max-w-[200px] truncate"
+                        title={!hasMap ? 'Generate a Knowledge Map to unlock topic-specific quizzes' : 'Filter exam by topic'}
+                      >
+                        <option value="">All Topics (General)</option>
+                        {hasMap ? (
+                          topicOptions.map((top, idx) => (
+                            <option key={idx} value={top}>{top}</option>
+                          ))
+                        ) : (
+                          <option value="" disabled>Generate a Knowledge Map to unlock topic-specific quizzes</option>
+                        )}
+                      </select>
+                    </div>
 
-              {examError && (
-                <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-sm flex items-center gap-2">
-                  <svg className="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
-                  <span>{examError}</span>
+                    {/* Difficulty Selector */}
+                    <div className="flex items-center gap-2">
+                      <label htmlFor="exam-difficulty" className="text-xs font-medium text-[#8EB69B]">Difficulty:</label>
+                      <select
+                        id="exam-difficulty"
+                        value={examDifficulty}
+                        onChange={(e) => setExamDifficulty(e.target.value as 'easy' | 'medium' | 'hard')}
+                        disabled={examLoading}
+                        style={{ backgroundColor: '#0A1A1B', border: '1px solid rgba(244,63,94,0.3)', color: '#DAF1DE' }}
+                        className="px-3.5 py-2.5 rounded-xl text-sm focus:outline-none focus:border-rose-400 cursor-pointer"
+                      >
+                        <option value="easy">Easy</option>
+                        <option value="medium">Medium</option>
+                        <option value="hard">Hard</option>
+                      </select>
+                    </div>
+
+                    {/* Start Button */}
+                    <button
+                      onClick={handleStartExam}
+                      disabled={examLoading}
+                      className="px-6 py-2.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-50 flex items-center gap-2 cursor-pointer hover:shadow-lg"
+                      style={{ background: 'linear-gradient(135deg, #f43f5e 0%, #e11d48 100%)', color: '#ffffff', boxShadow: '0 0 15px rgba(244,63,94,0.3)' }}
+                    >
+                      {examLoading ? (
+                        <>
+                          <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/></svg>
+                          <span>Preparing your exam...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>Start Mock Exam</span>
+                          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
-              )}
-            </div>
-          )}
+
+                {!hasMap && (
+                  <p className="text-xs text-amber-400/80 font-medium pl-1">
+                    💡 Note: Generate a Knowledge Map to unlock topic-specific quizzes.
+                  </p>
+                )}
+
+                {examError && (
+                  <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-sm flex items-center gap-2">
+                    <svg className="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                    <span>{examError}</span>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* TAKING MODE */}
           {examViewMode === 'taking' && (
@@ -2316,7 +2572,290 @@ const StudySubject: React.FC = () => {
             </div>
           )}
         </div>
+
+        {/* SECTION 7: QUIZ HISTORY SECTION */}
+        <div
+          style={{
+            background: 'linear-gradient(145deg, #0a1b24 0%, #09141c 100%)',
+            border: '1px solid rgba(168,212,220,0.12)',
+          }}
+          className="rounded-3xl p-6 md:p-8 flex flex-col gap-6 w-full"
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between flex-wrap gap-4 pb-4 border-b border-white/5">
+            <div className="flex items-center gap-3">
+              <div style={{ width: 40, height: 40, background: 'linear-gradient(135deg, #1e3a4a 0%, #0f2b38 100%)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#4EC9D4' }}>
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+              </div>
+              <div>
+                <h2 className="font-jakarta font-bold text-xl" style={{ color: '#DAF1DE' }}>Quiz & Exam History</h2>
+                <p className="text-xs text-[#8EB69B]">Review past attempts, questions, and performance over time</p>
+              </div>
+            </div>
+
+            {/* Toggle Button */}
+            <button
+              type="button"
+              onClick={() => {
+                if (!showQuizHistory) fetchQuizHistory();
+                setShowQuizHistory(!showQuizHistory);
+              }}
+              className="px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer border"
+              style={{
+                backgroundColor: showQuizHistory ? '#0D2A30' : '#0A1A1B',
+                borderColor: showQuizHistory ? 'rgba(78,201,212,0.4)' : 'rgba(168,212,220,0.18)',
+                color: showQuizHistory ? '#4EC9D4' : '#DAF1DE',
+              }}
+            >
+              <span>📜</span>
+              <span>{showQuizHistory ? 'Hide Past Attempts' : 'View Past Attempts'}</span>
+              <span className="px-2 py-0.5 rounded-full text-[10px] bg-teal-500/20 text-[#4EC9D4] font-bold">
+                {quizHistory.length}
+              </span>
+            </button>
+          </div>
+
+          {/* History Content */}
+          {showQuizHistory && (
+            <div className="flex flex-col gap-4">
+              {historyLoading ? (
+                <div className="flex justify-center py-8">
+                  <svg className="animate-spin h-6 w-6 text-[#A8D4DC]" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/></svg>
+                </div>
+              ) : quizHistory.length === 0 ? (
+                <div className="text-center py-8 px-4 text-xs rounded-2xl border border-dashed border-[#1a3a38] text-[#346659]">
+                  No quizzes taken yet for this subject.
+                </div>
+              ) : (
+                quizHistory.map((item) => {
+                  const isExpanded = expandedHistoryId === item._id;
+                  const formattedDate = new Date(item.takenAt || item.createdAt || Date.now()).toLocaleString('en-US', {
+                    month: 'short',
+                    day: 'numeric',
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  });
+
+                  // Color coding score
+                  let scoreColorClass = 'bg-rose-500/10 text-rose-400 border-rose-500/20';
+                  if (item.score >= 80) {
+                    scoreColorClass = 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
+                  } else if (item.score >= 50) {
+                    scoreColorClass = 'bg-amber-500/10 text-amber-400 border-amber-500/20';
+                  }
+
+                  return (
+                    <div
+                      key={item._id}
+                      className="rounded-2xl overflow-hidden transition-all"
+                      style={{
+                        backgroundColor: 'rgba(6, 14, 16, 0.6)',
+                        border: isExpanded ? '1px solid rgba(78,201,212,0.3)' : '1px solid rgba(168,212,220,0.1)',
+                      }}
+                    >
+                      {/* Compact Row */}
+                      <div
+                        onClick={() => setExpandedHistoryId(isExpanded ? null : item._id)}
+                        className="p-4 md:p-5 flex items-center justify-between gap-4 cursor-pointer hover:bg-white/5 transition-colors flex-wrap md:flex-nowrap"
+                      >
+                        <div className="flex items-center gap-3 flex-wrap">
+                          {/* Score Pill */}
+                          <div className={`px-3 py-1.5 rounded-xl border text-sm font-extrabold tracking-wide font-jakarta ${scoreColorClass}`}>
+                            {item.score}%
+                          </div>
+
+                          {/* Mode Badge */}
+                          {item.examMode ? (
+                            <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                              ⏱ Mock Exam
+                            </span>
+                          ) : (
+                            <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-teal-500/10 text-[#4EC9D4] border border-teal-500/20">
+                              📝 Quiz
+                            </span>
+                          )}
+
+                          {/* Difficulty Badge */}
+                          <span className="text-xs font-medium px-2 py-0.5 rounded-md bg-white/5 text-[#8EB69B] uppercase tracking-wider">
+                            {item.difficulty}
+                          </span>
+
+                          {/* Topic Badge if topic-specific */}
+                          {item.topic && (
+                            <span className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-amber-500/15 text-amber-300 border border-amber-500/30 truncate max-w-[200px]">
+                              📌 {item.topic}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-4 text-xs text-[#8EB69B] shrink-0">
+                          <span>{formattedDate}</span>
+                          <span className="text-sm text-[#4EC9D4] font-bold">
+                            {isExpanded ? '▲ Hide Breakdown' : '▼ Review Breakdown'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Inline Question Breakdown */}
+                      {isExpanded && (
+                        <div className="p-5 border-t border-white/5 bg-[#061012] flex flex-col gap-5">
+                          <h4 className="font-jakarta font-bold text-sm text-[#DAF1DE] flex items-center justify-between">
+                            <span>Question Breakdown ({item.questions?.length || 0} questions)</span>
+                            {item.timeTakenSeconds ? (
+                              <span className="text-xs font-normal text-[#8EB69B]">
+                                Time taken: {Math.floor(item.timeTakenSeconds / 60)}m {item.timeTakenSeconds % 60}s
+                              </span>
+                            ) : null}
+                          </h4>
+
+                          <div className="flex flex-col gap-4">
+                            {item.questions && item.questions.map((q, qIdx) => (
+                              <div
+                                key={qIdx}
+                                className="p-4 rounded-xl flex flex-col gap-2.5"
+                                style={{ backgroundColor: 'rgba(10, 26, 27, 0.8)', border: '1px solid rgba(168,212,220,0.08)' }}
+                              >
+                                <div className="flex items-start gap-2.5 text-sm font-semibold text-[#DAF1DE]">
+                                  <span className="text-xs font-bold text-[#4EC9D4] shrink-0 mt-0.5">{qIdx + 1}.</span>
+                                  <span>{q.question}</span>
+                                </div>
+
+                                <div className="flex flex-col gap-1.5 pl-6 text-xs">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-[#8EB69B] w-24 shrink-0 font-medium">Correct Answer:</span>
+                                    <span className="text-emerald-400 font-semibold">{q.correctAnswer}</span>
+                                  </div>
+
+                                  <div className="mt-1 p-3 rounded-lg bg-[#071315] border border-white/5 text-[#8EB69B]">
+                                    <span className="font-bold text-[#A8D4DC] block mb-0.5">Explanation:</span>
+                                    {q.explanation}
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
+          {/* SECTION 7: QUIZ HISTORY SECTION END */}
       </div>
+
+      {/* Floating XP Gain Animations */}
+      <style>{`
+        @keyframes floatUp {
+          0% { opacity: 0; transform: translateY(15px) scale(0.85); }
+          25% { opacity: 1; transform: translateY(0) scale(1.1); }
+          75% { opacity: 1; transform: translateY(-30px) scale(1); }
+          100% { opacity: 0; transform: translateY(-55px) scale(0.9); }
+        }
+      `}</style>
+
+      <div className="fixed top-24 right-10 z-50 pointer-events-none flex flex-col gap-2">
+        {xpPopups.map((popup) => (
+          <div
+            key={popup.id}
+            className="font-jakarta font-extrabold text-base px-4 py-2 rounded-2xl bg-teal-400 text-slate-950 shadow-[0_0_25px_rgba(78,201,212,0.8)] border border-teal-200 flex items-center gap-2"
+            style={{ animation: 'floatUp 2.2s ease-out forwards' }}
+          >
+            <span className="text-lg">⚡</span>
+            <span>+{popup.amount} XP</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Level Up Modal */}
+      {levelUpModal && (
+        <div
+          onClick={() => setLevelUpModal(null)}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md cursor-pointer animate-fade-in"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: 'linear-gradient(135deg, #0c2428 0%, #151233 100%)',
+              border: '2px solid #4EC9D4',
+              boxShadow: '0 0 60px rgba(78,201,212,0.5)',
+            }}
+            className="rounded-3xl p-8 max-w-md w-full text-center flex flex-col items-center gap-5 relative overflow-hidden"
+          >
+            <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-teal-400 to-blue-600 flex flex-col items-center justify-center text-white font-jakarta font-extrabold shadow-[0_0_35px_rgba(78,201,212,0.6)] animate-bounce">
+              <span className="text-[10px] uppercase tracking-widest opacity-80">LEVEL</span>
+              <span className="text-3xl">{levelUpModal.level}</span>
+            </div>
+
+            <div>
+              <span className="text-xs font-bold uppercase tracking-widest text-[#4EC9D4]">LEVEL UP!</span>
+              <h2 className="font-jakarta font-bold text-2xl text-white mt-1">You're now Level {levelUpModal.level}!</h2>
+              <p className="text-xs text-[#8EB69B] mt-2">Awesome work! Your knowledge and study consistency are paying off.</p>
+            </div>
+
+            <button
+              onClick={() => setLevelUpModal(null)}
+              className="px-6 py-2.5 rounded-xl text-xs font-semibold bg-teal-400 text-slate-950 shadow-lg hover:bg-teal-300 transition-all cursor-pointer"
+            >
+              Continue Learning →
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* New Badge Unlocked Modal */}
+      {badgeModal && (
+        <div
+          onClick={() => setBadgeModal(null)}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md cursor-pointer animate-fade-in"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: 'linear-gradient(135deg, #1c1809 0%, #201409 100%)',
+              border: '2px solid #fbbf24',
+              boxShadow: '0 0 60px rgba(251,191,36,0.4)',
+            }}
+            className="rounded-3xl p-8 max-w-md w-full text-center flex flex-col items-center gap-5 relative overflow-hidden"
+          >
+            <div className="text-6xl animate-bounce">🏆</div>
+
+            <div>
+              <span className="text-xs font-bold uppercase tracking-widest text-amber-400">NEW BADGE UNLOCKED!</span>
+              <div className="flex flex-col gap-2 mt-3">
+                {badgeModal.badges.map((bId) => {
+                  const b = BADGE_MAP[bId] || { name: bId, emoji: '🏅' };
+                  return (
+                    <div key={bId} className="px-4 py-2.5 rounded-2xl bg-amber-500/20 border border-amber-500/30 font-jakarta font-bold text-lg text-amber-200 flex items-center justify-center gap-2">
+                      <span>{b.emoji}</span>
+                      <span>{b.name}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <button
+              onClick={() => setBadgeModal(null)}
+              className="px-6 py-2.5 rounded-xl text-xs font-semibold bg-amber-400 text-slate-950 shadow-lg hover:bg-amber-300 transition-all cursor-pointer"
+            >
+              Awesome!
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Perfect Score Celebration Toast */}
+      {perfectScoreToast && (
+        <div className="fixed top-8 left-1/2 -translate-x-1/2 z-50 p-4 px-8 rounded-2xl bg-gradient-to-r from-amber-500 via-rose-500 to-teal-400 text-slate-950 font-jakarta font-black text-xl tracking-wider shadow-[0_0_50px_rgba(251,191,36,0.8)] border border-amber-200 animate-bounce flex items-center gap-3">
+          <span>💯</span>
+          <span>PERFECT SCORE! 100% CORRECT!</span>
+          <span>🎉</span>
+        </div>
+      )}
+    </div>
     </div>
   );
 };

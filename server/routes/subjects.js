@@ -10,10 +10,16 @@ const {
   getDashboardStats,
   logStudyTime,
   generateKnowledgeMap,
+  getRecentActivity,
+  getAllUserSubjects,
+  getFullReport,
 } = require('../controllers/subjectController');
 
 // ── Fixed / specific routes MUST come before parameterized routes (e.g. /:semesterId)
 router.get('/stats/overview', protect, getDashboardStats);
+router.get('/activity/recent', protect, getRecentActivity);
+router.get('/user/all', protect, getAllUserSubjects);
+router.get('/report/full', protect, getFullReport);
 router.get('/single/:id', protect, getSubjectById);
 router.get('/:semesterId', protect, getSubjects);
 router.post('/', protect, createSubject);

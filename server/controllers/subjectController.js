@@ -293,6 +293,168 @@ JSON structure required:
   }
 };
 
+// ── @desc   Get combined recent activity (chats and quizzes) for user
+// ── @route  GET /api/subjects/activity/recent
+// ── @access Private
+const getRecentActivity = async (req, res) => {
+  try {
+    const ChatMessage = require('../models/ChatMessage');
+
+    const recentChats = await ChatMessage.find({
+      userId: req.userId,
+      role: 'user',
+    })
+      .sort({ createdAt: -1 })
+      .limit(5)
+      .populate('subjectId', 'name');
+
+    const recentQuizzes = await Quiz.find({
+      userId: req.userId,
+    })
+      .sort({ takenAt: -1, createdAt: -1 })
+      .limit(3)
+      .populate('subjectId', 'name');
+
+    const chatItems = recentChats.map((c) => ({
+      id: c._id,
+      type: 'chat',
+      subjectName: c.subjectId?.name || 'Subject',
+      subjectId: c.subjectId?._id || c.subjectId,
+      text: c.content,
+      date: c.createdAt,
+    }));
+
+    const quizItems = recentQuizzes.map((q) => ({
+      id: q._id,
+      type: 'quiz',
+      subjectName: q.subjectId?.name || 'Subject',
+      subjectId: q.subjectId?._id || q.subjectId,
+      score: q.score,
+      date: q.takenAt || q.createdAt,
+    }));
+
+    const combined = [...chatItems, ...quizItems];
+    combined.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+    const limited = combined.slice(0, 5);
+
+    return res.json(limited);
+  } catch (error) {
+    console.error('Error in getRecentActivity:', error.message);
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+// ── @desc   Get all user subjects across all semesters
+// ── @route  GET /api/subjects/user/all
+// ── @access Private
+const getAllUserSubjects = async (req, res) => {
+  try {
+    const subjects = await Subject.find({ userId: req.userId }).sort({ name: 1 });
+    return res.json(subjects);
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+// ── @desc   Get comprehensive full progress report data for user
+// ── @route  GET /api/subjects/report/full
+// ── @access Private
+const getFullReport = async (req, res) => {
+  try {
+    const ChatMessage = require('../models/ChatMessage');
+
+    const subjects = await Subject.find({ userId: req.userId });
+    const quizzes = await Quiz.find({ userId: req.userId }).sort({ takenAt: 1, createdAt: 1 });
+    const materialsCount = await Material.countDocuments({ userId: req.userId });
+    const chatCount = await ChatMessage.countDocuments({ userId: req.userId, role: 'user' });
+
+    let totalStudyTimeMinutes = 0;
+    subjects.forEach((s) => {
+      totalStudyTimeMinutes += s.studyTimeMinutes || 0;
+    });
+
+    const chatCountsBySubject = {};
+    const chats = await ChatMessage.find({ userId: req.userId, role: 'user' });
+    chats.forEach((c) => {
+      const sid = c.subjectId ? c.subjectId.toString() : 'unknown';
+      chatCountsBySubject[sid] = (chatCountsBySubject[sid] || 0) + 1;
+    });
+
+    const quizCountsBySubject = {};
+    const quizScoresBySubject = {};
+    quizzes.forEach((q) => {
+      const sid = q.subjectId ? q.subjectId.toString() : 'unknown';
+      quizCountsBySubject[sid] = (quizCountsBySubject[sid] || 0) + 1;
+      if (!quizScoresBySubject[sid]) quizScoresBySubject[sid] = [];
+      quizScoresBySubject[sid].push({
+        date: q.takenAt || q.createdAt,
+        score: q.score || 0,
+      });
+    });
+
+    const subjectReports = subjects.map((s) => {
+      const sid = s._id.toString();
+      const scoresTrend = quizScoresBySubject[sid] || [];
+      const quizCount = scoresTrend.length;
+      let avgScore = 0;
+      if (quizCount > 0) {
+        const sum = scoresTrend.reduce((acc, curr) => acc + curr.score, 0);
+        avgScore = Math.round(sum / quizCount);
+      }
+
+      return {
+        subjectId: s._id,
+        name: s.name,
+        studyTimeMinutes: s.studyTimeMinutes || 0,
+        weakTopics: s.weakTopics || [],
+        strongTopics: s.strongTopics || [],
+        quizCount,
+        averageScore: avgScore,
+        scoresTrend,
+      };
+    });
+
+    let mostActiveSubject = null;
+    let maxActivityScore = -1;
+
+    subjects.forEach((s) => {
+      const sid = s._id.toString();
+      const studyMins = s.studyTimeMinutes || 0;
+      const cCount = chatCountsBySubject[sid] || 0;
+      const qCount = quizCountsBySubject[sid] || 0;
+      const activityScore = studyMins + cCount * 5 + qCount * 10;
+
+      if (activityScore > maxActivityScore) {
+        maxActivityScore = activityScore;
+        mostActiveSubject = {
+          subjectId: s._id,
+          name: s.name,
+          studyTimeMinutes: studyMins,
+          chatCount: cCount,
+          quizCount: qCount,
+          activityScore,
+        };
+      }
+    });
+
+    return res.json({
+      summary: {
+        totalStudyTimeMinutes,
+        totalQuizzesTaken: quizzes.length,
+        totalMaterialsUploaded: materialsCount,
+        totalQuestionsAsked: chatCount,
+        totalSubjects: subjects.length,
+      },
+      mostActiveSubject,
+      subjects: subjectReports,
+    });
+  } catch (error) {
+    console.error('Error in getFullReport:', error.message);
+    return res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
   getSubjects,
   createSubject,
@@ -302,4 +464,7 @@ module.exports = {
   getDashboardStats,
   logStudyTime,
   generateKnowledgeMap,
+  getRecentActivity,
+  getAllUserSubjects,
+  getFullReport,
 };

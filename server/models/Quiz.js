@@ -36,6 +36,10 @@ const quizSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    topic: {
+      type: String,
+      default: '',
+    },
     takenAt: {
       type: Date,
       default: Date.now,

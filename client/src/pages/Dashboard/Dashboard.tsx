@@ -27,6 +27,53 @@ interface DashboardStats {
   totalQuizzesTaken: number;
 }
 
+interface ExamItem {
+  _id: string;
+  name: string;
+  examDate: string;
+  subjectId: {
+    _id: string;
+    name: string;
+  } | string;
+}
+
+interface ActivityItem {
+  id?: string;
+  type: 'chat' | 'quiz' | string;
+  title: string;
+  subjectName: string;
+  subjectId: string;
+  date: string;
+  text?: string;
+  score?: number;
+}
+
+interface UserGamificationStats {
+  xp: number;
+  level: number;
+  currentStreak: number;
+  longestStreak: number;
+  badges: string[];
+}
+
+const ALL_BADGES = [
+  { id: 'first_quiz', name: '🎯 First Steps', desc: 'Completed your first quiz attempt' },
+  { id: 'quiz_master', name: '🏆 Quiz Master', desc: 'Completed 10 quiz attempts' },
+  { id: 'week_streak', name: '🔥 Week Warrior', desc: 'Maintained a 7-day study streak' },
+  { id: 'knowledge_seeker', name: '🧠 Knowledge Seeker', desc: 'Generated knowledge maps' },
+  { id: 'perfect_score', name: '💯 Perfectionist', desc: 'Achieved a 100% quiz score' },
+  { id: 'night_owl', name: '🦉 Night Owl', desc: 'Studied after 10 PM' },
+];
+
+interface SubjectItem {
+  _id: string;
+  name: string;
+  semesterId: string;
+  weakTopics?: string[];
+  strongTopics?: string[];
+  updatedAt?: string;
+}
+
 /* ─── Theme tokens ─────────────────────────────────────────── */
 const semesterThemes = [
   { iconBg: 'linear-gradient(135deg,#0d3d3a 0%,#1a5c5a 100%)', glow: 'rgba(168,212,220,0.25)', iconColor: '#A8D4DC', bar: 'linear-gradient(90deg,#A8D4DC,#4EC9D4)' },
@@ -115,7 +162,7 @@ const Dashboard: React.FC = () => {
   const [addLoading, setAddLoading] = useState(false);
   const [error, setError] = useState('');
 
-  // Dashboard Stats state
+  // Dashboard Stat card stats
   const [stats, setStats] = useState<DashboardStats>({
     overallProgress: 0,
     totalStudyTimeMinutes: 0,
@@ -125,6 +172,24 @@ const Dashboard: React.FC = () => {
     totalQuizzesTaken: 0,
   });
   const [statsLoading, setStatsLoading] = useState(true);
+
+  // Gamification stats
+  const [userStats, setUserStats] = useState<UserGamificationStats | null>(null);
+  const [_userStatsLoading, setUserStatsLoading] = useState(true);
+
+  // Exams state
+  const [exams, setExams] = useState<ExamItem[]>([]);
+  const [examsLoading, setExamsLoading] = useState(true);
+  const [showAddExamModal, setShowAddExamModal] = useState(false);
+  const [allUserSubjects, setAllUserSubjects] = useState<SubjectItem[]>([]);
+  const [examSubjectId, setExamSubjectId] = useState('');
+  const [examNameInput, setExamNameInput] = useState('');
+  const [examDateInput, setExamDateInput] = useState('');
+  const [creatingExam, setCreatingExam] = useState(false);
+
+  // Recent Activity state
+  const [activities, setActivities] = useState<ActivityItem[]>([]);
+  const [activitiesLoading, setActivitiesLoading] = useState(true);
 
   const { user, logoutUser } = useAuth();
 
@@ -158,6 +223,62 @@ const Dashboard: React.FC = () => {
     fetchStats();
   }, []);
 
+  // Fetch Upcoming Exams
+  useEffect(() => {
+    const fetchExams = async () => {
+      try {
+        const res = await API.get('/exams');
+        setExams(res.data);
+      } catch (err: any) {
+        console.error('Failed to fetch exams:', err);
+      } finally {
+        setExamsLoading(false);
+      }
+    };
+    fetchExams();
+  }, []);
+
+  // Fetch Recent Activity
+  useEffect(() => {
+    const fetchActivity = async () => {
+      try {
+        const res = await API.get('/subjects/activity/recent');
+        setActivities(res.data);
+      } catch (err: any) {
+        console.error('Failed to fetch recent activity:', err);
+      } finally {
+        setActivitiesLoading(false);
+      }
+    };
+    fetchActivity();
+  }, []);
+
+  // Fetch All User Subjects & Gamification Stats
+  useEffect(() => {
+    const fetchUserSubjects = async () => {
+      try {
+        const res = await API.get('/subjects/user/all');
+        setAllUserSubjects(res.data);
+      } catch (err: any) {
+        console.error('Failed to fetch user subjects:', err);
+      }
+    };
+
+    const fetchGamificationStats = async () => {
+      try {
+        const res = await API.get('/stats');
+        setUserStats(res.data);
+      } catch (err: any) {
+        console.error('Failed to fetch gamification stats:', err);
+      } finally {
+        setUserStatsLoading(false);
+      }
+    };
+
+    fetchUserSubjects();
+    fetchGamificationStats();
+  }, []);
+
   const handleAddSemester = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newSemester.trim()) return;
@@ -173,12 +294,75 @@ const Dashboard: React.FC = () => {
     }
   };
 
+  const handleCreateExam = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!examSubjectId || !examNameInput.trim() || !examDateInput) return;
+    setCreatingExam(true);
+    try {
+      const res = await API.post('/exams', {
+        subjectId: examSubjectId,
+        name: examNameInput.trim(),
+        examDate: examDateInput,
+      });
+      setExams((prev) => [...prev, res.data].sort((a, b) => new Date(a.examDate).getTime() - new Date(b.examDate).getTime()));
+      setShowAddExamModal(false);
+      setExamNameInput('');
+      setExamDateInput('');
+      setExamSubjectId('');
+    } catch (err: any) {
+      console.error('Failed to create exam:', err);
+    } finally {
+      setCreatingExam(false);
+    }
+  };
+
   // Helper to format minutes to hours and minutes
   const formatStudyTime = (minutes: number) => {
     if (!minutes || minutes <= 0) return { hours: 0, mins: 0 };
     const hours = Math.floor(minutes / 60);
     const mins = minutes % 60;
     return { hours, mins };
+  };
+
+  const calculateDaysUntil = (dateStr: string) => {
+    const examDate = new Date(dateStr);
+    examDate.setHours(0, 0, 0, 0);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const diffTime = examDate.getTime() - today.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+    if (diffDays === 0) return 'Today';
+    if (diffDays === 1) return 'Tomorrow';
+    if (diffDays < 0) return 'Passed';
+    return `In ${diffDays} days`;
+  };
+
+  const formatExamDateNice = (dateStr: string) => {
+    try {
+      const d = new Date(dateStr);
+      const month = d.toLocaleDateString('en-US', { month: 'short' }).toUpperCase();
+      const day = d.getDate().toString().padStart(2, '0');
+      return { month, day };
+    } catch {
+      return { month: 'EXAM', day: '01' };
+    }
+  };
+
+  const formatRelativeTime = (dateStr: string) => {
+    const now = new Date();
+    const past = new Date(dateStr);
+    const diffMs = now.getTime() - past.getTime();
+    const diffMins = Math.floor(diffMs / (1000 * 60));
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays < 30) return `${diffDays}d ago`;
+    return past.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   };
 
   const semesterCompletion = [72, 68, 55, 20];
@@ -233,7 +417,7 @@ const Dashboard: React.FC = () => {
             <button
               type="submit"
               disabled={addLoading}
-              className="px-5 py-3 rounded-xl text-sm font-semibold font-jakarta transition-all flex items-center gap-1.5 disabled:opacity-50 whitespace-nowrap hover:shadow-lg"
+              className="px-5 py-3 rounded-xl text-sm font-semibold font-jakarta transition-all flex items-center gap-1.5 disabled:opacity-50 whitespace-nowrap hover:shadow-lg cursor-pointer"
               style={{ background: 'linear-gradient(135deg, #A8D4DC 0%, #4EC9D4 100%)', color: '#040D0E', boxShadow: '0 0 20px rgba(168,212,220,0.25)' }}
             >
               {addLoading ? (
@@ -305,6 +489,130 @@ const Dashboard: React.FC = () => {
         {/* ═══════════════ RIGHT — Dashboard ═══════════════ */}
         <div className="flex-1 flex flex-col gap-6 min-w-0">
 
+          {/* Header with View Full Report Link */}
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="font-jakarta font-bold text-2xl text-[#DAF1DE]">Dashboard Overview</h2>
+              <p className="text-xs text-[#8EB69B]">Key performance metrics across all semesters & subjects</p>
+            </div>
+            <Link
+              to="/reports"
+              className="px-4 py-2.5 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer hover:border-teal-400"
+              style={{ background: 'linear-gradient(135deg, #0d2820 0%, #0a1a2a 100%)', border: '1px solid rgba(168,212,220,0.22)', color: '#4EC9D4', textDecoration: 'none' }}
+            >
+              <span>📊</span>
+              <span>View Full Report →</span>
+            </Link>
+          </div>
+
+          {/* ── Gamification Banner & Badges Card ── */}
+          <div
+            style={{
+              background: 'linear-gradient(135deg, #0c2024 0%, #0d1a2d 50%, #151028 100%)',
+              border: '1px solid rgba(78,201,212,0.25)',
+              boxShadow: '0 0 35px rgba(78,201,212,0.06)',
+            }}
+            className="rounded-3xl p-6 md:p-7 flex flex-col lg:flex-row items-stretch justify-between gap-6"
+          >
+            {/* Left: Level & XP Progress & Streak */}
+            <div className="flex-1 flex flex-col justify-between gap-4">
+              <div className="flex items-center justify-between flex-wrap gap-4">
+                {/* Level Badge */}
+                <div className="flex items-center gap-4">
+                  <div
+                    style={{
+                      width: 56,
+                      height: 56,
+                      background: 'linear-gradient(135deg, #4EC9D4 0%, #2563eb 100%)',
+                      borderRadius: '50%',
+                      boxShadow: '0 0 20px rgba(78,201,212,0.4)',
+                    }}
+                    className="flex flex-col items-center justify-center text-white shrink-0 font-jakarta font-extrabold"
+                  >
+                    <span className="text-[9px] uppercase tracking-widest opacity-80 leading-none">LVL</span>
+                    <span className="text-xl leading-none">{userStats ? userStats.level : 1}</span>
+                  </div>
+
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-jakarta font-bold text-lg text-[#DAF1DE]">Level {userStats ? userStats.level : 1} Scholar</h3>
+                      <span className="text-xs px-2.5 py-0.5 rounded-full bg-teal-500/20 text-[#4EC9D4] font-bold border border-teal-500/30">
+                        {userStats ? userStats.xp : 0} XP
+                      </span>
+                    </div>
+                    <p className="text-xs text-[#8EB69B]">Keep studying and taking quizzes to earn XP & level up!</p>
+                  </div>
+                </div>
+
+                {/* Streak Badge */}
+                <div className="flex items-center gap-2.5 px-4 py-2 rounded-2xl bg-amber-500/10 border border-amber-500/20 shrink-0">
+                  <span className="text-2xl animate-pulse">🔥</span>
+                  <div>
+                    {userStats && userStats.currentStreak > 0 ? (
+                      <span className="font-jakarta font-bold text-sm text-amber-300 block">
+                        {userStats.currentStreak} Day Streak!
+                      </span>
+                    ) : (
+                      <span className="text-xs text-amber-300/70 font-medium block">
+                        Start your streak today!
+                      </span>
+                    )}
+                    <span className="text-[10px] text-amber-400/60 block">
+                      Best: {userStats ? userStats.longestStreak : 0} days
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* XP Progress Bar */}
+              <div className="flex flex-col gap-1.5 mt-1">
+                <div className="flex items-center justify-between text-xs text-[#8EB69B]">
+                  <span>Progress to Level {(userStats?.level || 1) + 1}</span>
+                  <span className="font-semibold text-[#4EC9D4]">
+                    {(userStats?.xp || 0) % 100} / 100 XP
+                  </span>
+                </div>
+                <div className="w-full h-3 rounded-full bg-[#061012] border border-white/5 overflow-hidden p-0.5">
+                  <div
+                    className="h-full rounded-full transition-all duration-500"
+                    style={{
+                      width: `${(userStats?.xp || 0) % 100}%`,
+                      background: 'linear-gradient(90deg, #A8D4DC 0%, #4EC9D4 50%, #2563eb 100%)',
+                      boxShadow: '0 0 10px rgba(78,201,212,0.5)',
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Right Divider & Badges Grid */}
+            <div className="lg:border-l lg:border-white/10 lg:pl-6 flex flex-col gap-3 justify-center">
+              <span className="text-xs font-bold uppercase tracking-wider text-[#8EB69B]">
+                Badges Unlocked ({userStats?.badges?.length || 0} / {ALL_BADGES.length})
+              </span>
+
+              <div className="grid grid-cols-3 gap-2.5">
+                {ALL_BADGES.map((b) => {
+                  const isUnlocked = userStats?.badges?.includes(b.id);
+                  return (
+                    <div
+                      key={b.id}
+                      title={`${b.name}: ${b.desc}${isUnlocked ? ' (Unlocked)' : ' (Locked)'}`}
+                      className={`px-3 py-2 rounded-xl flex items-center gap-2 text-xs font-semibold transition-all cursor-pointer border ${
+                        isUnlocked
+                          ? 'bg-teal-500/15 border-teal-500/40 text-teal-200 shadow-[0_0_12px_rgba(78,201,212,0.2)]'
+                          : 'bg-white/5 border-white/5 text-white/30 grayscale opacity-60'
+                      }`}
+                    >
+                      <span className="text-base shrink-0">{b.name.split(' ')[0]}</span>
+                      <span className="truncate text-[11px]">{b.name.split(' ').slice(1).join(' ')}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
           {/* ── Row 1: 4 stat cards ── */}
           <div className="grid grid-cols-4 gap-6">
 
@@ -339,8 +647,7 @@ const Dashboard: React.FC = () => {
               <p className="text-xs" style={{ color: '#4a7a68' }}>Across all semesters</p>
             </div>
 
-            {/* Upcoming Exams */}
-            {/* NOTE: Static 0 placeholder — pending future Exams feature implementation in later phase */}
+            {/* Upcoming Exams Stat Card */}
             <div style={{ background: 'linear-gradient(145deg, #0e1e18 0%, #091a15 100%)', border: '1px solid rgba(142,182,155,0.12)', boxShadow: '0 0 40px rgba(142,182,155,0.04)' }} className="rounded-3xl p-8 flex flex-col gap-5">
               <div className="flex items-center gap-3">
                 <IconBadge bg="linear-gradient(135deg,#0d3d2a,#1a5c3a)" glow="rgba(142,182,155,0.3)" color="#8EB69B">
@@ -348,8 +655,12 @@ const Dashboard: React.FC = () => {
                 </IconBadge>
                 <span className="text-sm font-semibold" style={{ color: '#8EB69B' }}>Upcoming Exams</span>
               </div>
-              <p className="font-jakarta font-bold" style={{ fontSize: 52, lineHeight: 1, background: 'linear-gradient(135deg, #DAF1DE, #8EB69B)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>0</p>
-              <p className="text-xs" style={{ color: '#4a7a68' }}>Exams feature coming soon</p>
+              <p className="font-jakarta font-bold" style={{ fontSize: 52, lineHeight: 1, background: 'linear-gradient(135deg, #DAF1DE, #8EB69B)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+                {examsLoading ? '...' : exams.length}
+              </p>
+              <p className="text-xs" style={{ color: '#4a7a68' }}>
+                {exams.length === 1 ? '1 upcoming exam scheduled' : `${exams.length} upcoming exams scheduled`}
+              </p>
             </div>
 
             {/* Exam Readiness */}
@@ -414,7 +725,7 @@ const Dashboard: React.FC = () => {
               </div>
             </div>
 
-            {/* Upcoming Exams list */}
+            {/* Upcoming Exams List Section */}
             <div style={{ background: 'linear-gradient(145deg, #0e1e18 0%, #091a15 100%)', border: '1px solid rgba(142,182,155,0.12)' }} className="rounded-3xl p-8 flex flex-col gap-7">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
@@ -423,31 +734,51 @@ const Dashboard: React.FC = () => {
                   </IconBadge>
                   <span className="font-jakarta font-bold text-base" style={{ color: '#DAF1DE' }}>Upcoming Exams</span>
                 </div>
-                <span className="text-sm font-medium cursor-pointer hover:underline" style={{ color: '#4EC9D4' }}>View calendar</span>
+                <button
+                  type="button"
+                  onClick={() => setShowAddExamModal(true)}
+                  className="px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1 transition-all cursor-pointer hover:border-teal-400"
+                  style={{ background: 'linear-gradient(135deg, #0d2820 0%, #0a1a2a 100%)', border: '1px solid rgba(168,212,220,0.2)', color: '#4EC9D4' }}
+                >
+                  + Add Exam
+                </button>
               </div>
+
               <div className="flex flex-col gap-5">
-                {[
-                  { month: 'MAY', day: '24', title: 'Data Structures', sub: 'Semester 2 · 10:00 AM', daysLeft: 3 },
-                  { month: 'MAY', day: '27', title: 'Operating Systems', sub: 'Semester 2 · 02:00 PM', daysLeft: 6 },
-                  { month: 'JUN', day: '02', title: 'Discrete Mathematics', sub: 'Semester 1 · 11:00 AM', daysLeft: 12 },
-                ].map((exam) => (
-                  <div key={exam.day + exam.month} className="flex items-center gap-4">
-                    {/* Date badge */}
-                    <div className="flex flex-col items-center justify-center rounded-xl text-center shrink-0" style={{ width: 52, height: 52, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(168,212,220,0.15)' }}>
-                      <span style={{ fontSize: 10, fontWeight: 700, color: '#4EC9D4', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{exam.month}</span>
-                      <span className="font-jakarta font-bold" style={{ fontSize: 18, color: '#DAF1DE', lineHeight: 1.1 }}>{exam.day}</span>
-                    </div>
-                    {/* Info */}
-                    <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-sm truncate" style={{ color: '#DAF1DE' }}>{exam.title}</p>
-                      <p className="text-xs truncate mt-0.5" style={{ color: '#4a7a68' }}>{exam.sub}</p>
-                    </div>
-                    {/* Days pill */}
-                    <span className="shrink-0 text-xs font-semibold rounded-full px-3 py-1" style={{ background: 'rgba(149,155,185,0.15)', color: '#B8A0E8', border: '1px solid rgba(149,155,185,0.2)' }}>
-                      In {exam.daysLeft} days
-                    </span>
+                {examsLoading ? (
+                  <div className="flex justify-center py-6">
+                    <svg className="animate-spin h-5 w-5 text-[#A8D4DC]" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/></svg>
                   </div>
-                ))}
+                ) : exams.length === 0 ? (
+                  <div className="text-center py-6 px-4 text-xs rounded-2xl border border-dashed border-[#1a3a38] text-[#346659]">
+                    No exams scheduled yet.
+                  </div>
+                ) : (
+                  exams.map((exam) => {
+                    const { month, day } = formatExamDateNice(exam.examDate);
+                    const subjName = typeof exam.subjectId === 'object' ? exam.subjectId.name : 'Subject';
+                    const daysLeftText = calculateDaysUntil(exam.examDate);
+
+                    return (
+                      <div key={exam._id} className="flex items-center gap-4">
+                        {/* Date badge */}
+                        <div className="flex flex-col items-center justify-center rounded-xl text-center shrink-0" style={{ width: 52, height: 52, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(168,212,220,0.15)' }}>
+                          <span style={{ fontSize: 10, fontWeight: 700, color: '#4EC9D4', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{month}</span>
+                          <span className="font-jakarta font-bold" style={{ fontSize: 18, color: '#DAF1DE', lineHeight: 1.1 }}>{day}</span>
+                        </div>
+                        {/* Info */}
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold text-sm truncate" style={{ color: '#DAF1DE' }}>{exam.name}</p>
+                          <p className="text-xs truncate mt-0.5" style={{ color: '#4a7a68' }}>{subjName}</p>
+                        </div>
+                        {/* Days pill */}
+                        <span className="shrink-0 text-xs font-semibold rounded-full px-3 py-1" style={{ background: 'rgba(149,155,185,0.15)', color: '#B8A0E8', border: '1px solid rgba(149,155,185,0.2)' }}>
+                          {daysLeftText}
+                        </span>
+                      </div>
+                    );
+                  })
+                )}
               </div>
             </div>
           </div>
@@ -464,89 +795,211 @@ const Dashboard: React.FC = () => {
                 <span className="font-jakarta font-bold text-base" style={{ color: '#DAF1DE' }}>Recent Activity</span>
               </div>
               <div className="flex flex-col gap-5">
-                {[
-                  { icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round"><path d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.746 0 3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>, label: 'Studied Data Structures', sub: 'Arrays and Linked Lists', time: '2h ago', bg: 'linear-gradient(135deg,#0d3d3a,#1a5c5a)', color: '#A8D4DC' },
-                  { icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>, label: 'Completed Quiz', sub: 'Operating Systems - Quiz 2', time: '5h ago', bg: 'linear-gradient(135deg,#1a2d4a,#1e4a6e)', color: '#7EC8E3' },
-                  { icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round"><path d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>, label: 'Notes Added', sub: 'Computer Networks - TCP/IP', time: '1d ago', bg: 'linear-gradient(135deg,#2a1a4a,#3d2070)', color: '#B8A0E8' },
-                  { icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round"><path d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>, label: 'Watched Lecture', sub: 'Database Systems - Normalization', time: '2d ago', bg: 'linear-gradient(135deg,#3a1a2a,#5c1a40)', color: '#F472B6' },
-                ].map((a, i) => (
-                  <div key={i} className="flex items-center gap-4">
-                    <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: a.bg, color: a.color }}>
-                      <div style={{ width: 18, height: 18 }}>{a.icon}</div>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-white truncate">{a.label}</p>
-                      <p className="text-xs truncate mt-0.5" style={{ color: '#4a7a68' }}>{a.sub}</p>
-                    </div>
-                    <span className="text-xs shrink-0" style={{ color: '#4a7a68' }}>{a.time}</span>
+                {activitiesLoading ? (
+                  <div className="flex justify-center py-6">
+                    <svg className="animate-spin h-5 w-5 text-[#A8D4DC]" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/></svg>
                   </div>
-                ))}
+                ) : activities.length === 0 ? (
+                  <div className="text-center py-6 px-4 text-xs rounded-2xl border border-dashed border-[#1a3a38] text-[#346659]">
+                    No activity yet — start studying to see it here.
+                  </div>
+                ) : (
+                  activities.map((a) => {
+                    const isChat = a.type === 'chat';
+                    const labelText = isChat ? `Asked about ${a.subjectName}` : `Completed Quiz - ${a.subjectName}`;
+                    const subText = isChat ? a.text : `Score: ${a.score}%`;
+                    const iconBg = isChat ? 'linear-gradient(135deg,#0d3d3a,#1a5c5a)' : 'linear-gradient(135deg,#1a2d4a,#1e4a6e)';
+                    const iconColor = isChat ? '#A8D4DC' : '#7EC8E3';
+
+                    return (
+                      <div key={a.id} className="flex items-center gap-4">
+                        <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: iconBg, color: iconColor }}>
+                          <div style={{ width: 18, height: 18 }}>
+                            {isChat ? (
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round"><path d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/></svg>
+                            ) : (
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-white truncate">{labelText}</p>
+                          <p className="text-xs truncate mt-0.5" style={{ color: '#4a7a68' }}>{subText}</p>
+                        </div>
+                        <span className="text-xs shrink-0" style={{ color: '#4a7a68' }}>{formatRelativeTime(a.date)}</span>
+                      </div>
+                    );
+                  })
+                )}
               </div>
             </div>
 
             {/* Quick Access */}
-            <div style={{ background: 'linear-gradient(145deg, #0c1828 0%, #091018 100%)', border: '1px solid rgba(168,212,220,0.12)' }} className="rounded-3xl p-8 flex flex-col gap-6">
-              <div className="flex items-center gap-3">
-                <IconBadge bg="linear-gradient(135deg,#1a2d4a,#1e4a6e)" glow="rgba(126,200,227,0.25)" color="#7EC8E3" size={42}>
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-                </IconBadge>
-                <span className="font-jakarta font-bold text-base" style={{ color: '#DAF1DE' }}>Quick Access</span>
-              </div>
+            {(() => {
+              const lastStudiedSubject = (() => {
+                if (activities.length > 0) {
+                  const recentSubj = allUserSubjects.find((s) => s._id === activities[0].subjectId);
+                  if (recentSubj) return recentSubj;
+                }
+                return allUserSubjects[0] || null;
+              })();
 
-              {/* Last studied card */}
-              <div className="relative rounded-2xl overflow-hidden p-6 flex-1" style={{ background: 'linear-gradient(135deg, #0d2535 0%, #162840 50%, #1a2040 100%)', border: '1px solid rgba(168,212,220,0.22)', boxShadow: '0 0 36px rgba(168,212,220,0.1), 0 0 60px rgba(149,155,185,0.06)' }}>
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex flex-col gap-4">
-                    <div>
-                      <p className="text-xs font-bold uppercase tracking-widest mb-1.5" style={{ color: '#4EC9D4', letterSpacing: '0.12em' }}>Last Studied</p>
-                      <p className="font-jakarta font-bold text-2xl text-white leading-snug">Data Structures</p>
-                      <p className="text-sm mt-1.5" style={{ color: '#8EB69B' }}>Arrays and Linked Lists</p>
+              return (
+                <div style={{ background: 'linear-gradient(145deg, #0c1828 0%, #091018 100%)', border: '1px solid rgba(168,212,220,0.12)' }} className="rounded-3xl p-8 flex flex-col gap-6">
+                  <div className="flex items-center gap-3">
+                    <IconBadge bg="linear-gradient(135deg,#1a2d4a,#1e4a6e)" glow="rgba(126,200,227,0.25)" color="#7EC8E3" size={42}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                    </IconBadge>
+                    <span className="font-jakarta font-bold text-base" style={{ color: '#DAF1DE' }}>Quick Access</span>
+                  </div>
+
+                  {/* Last studied card */}
+                  {lastStudiedSubject ? (
+                    <div className="relative rounded-2xl overflow-hidden p-6 flex-1" style={{ background: 'linear-gradient(135deg, #0d2535 0%, #162840 50%, #1a2040 100%)', border: '1px solid rgba(168,212,220,0.22)', boxShadow: '0 0 36px rgba(168,212,220,0.1), 0 0 60px rgba(149,155,185,0.06)' }}>
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex flex-col gap-4">
+                          <div>
+                            <p className="text-xs font-bold uppercase tracking-widest mb-1.5" style={{ color: '#4EC9D4', letterSpacing: '0.12em' }}>Last Studied</p>
+                            <p className="font-jakarta font-bold text-2xl text-white leading-snug">{lastStudiedSubject.name}</p>
+                            <p className="text-sm mt-1.5" style={{ color: '#8EB69B' }}>
+                              {lastStudiedSubject.weakTopics && lastStudiedSubject.weakTopics.length > 0
+                                ? `Focus: ${lastStudiedSubject.weakTopics[0]}`
+                                : 'Continue your study session'}
+                            </p>
+                          </div>
+                          <Link
+                            to={`/subjects/${lastStudiedSubject._id}`}
+                            className="self-start px-6 py-2.5 text-sm font-semibold rounded-xl transition-all"
+                            style={{ background: 'linear-gradient(135deg, #A8D4DC, #4EC9D4)', color: '#040D0E', boxShadow: '0 0 20px rgba(168,212,220,0.35)', textDecoration: 'none' }}
+                          >
+                            Continue →
+                          </Link>
+                        </div>
+                        {/* Glowing Graphic */}
+                        <div className="relative shrink-0 flex items-center justify-center" style={{ width: 110, height: 110 }}>
+                          <div style={{ position: 'absolute', inset: -10, borderRadius: '50%', background: 'radial-gradient(circle, rgba(78,201,212,0.25) 0%, rgba(149,155,185,0.15) 50%, transparent 75%)', filter: 'blur(12px)' }} />
+                          <img src={logo} alt="Subject" style={{ width: 100, height: 100, objectFit: 'contain', filter: 'drop-shadow(0 0 18px rgba(78,201,212,0.6)) drop-shadow(0 0 36px rgba(149,155,185,0.4))', position: 'relative', zIndex: 1 }} />
+                        </div>
+                      </div>
                     </div>
-                    <button className="self-start px-6 py-2.5 text-sm font-semibold rounded-xl transition-all" style={{ background: 'linear-gradient(135deg, #A8D4DC, #4EC9D4)', color: '#040D0E', boxShadow: '0 0 20px rgba(168,212,220,0.35)' }}>
-                      Continue →
-                    </button>
-                  </div>
-                  {/* Glowing 3D cube graphic */}
-                  <div className="relative shrink-0 flex items-center justify-center" style={{ width: 110, height: 110 }}>
-                    <div style={{ position: 'absolute', inset: -10, borderRadius: '50%', background: 'radial-gradient(circle, rgba(78,201,212,0.25) 0%, rgba(149,155,185,0.15) 50%, transparent 75%)', filter: 'blur(12px)' }} />
-                    <img src={logo} alt="Subject" style={{ width: 100, height: 100, objectFit: 'contain', filter: 'drop-shadow(0 0 18px rgba(78,201,212,0.6)) drop-shadow(0 0 36px rgba(149,155,185,0.4))', position: 'relative', zIndex: 1 }} />
-                  </div>
-                </div>
-              </div>
+                  ) : (
+                    <div className="rounded-2xl p-6 text-center text-xs flex flex-col items-center justify-center gap-2 border border-dashed border-[#1a3a38] flex-1" style={{ backgroundColor: 'rgba(6, 14, 16, 0.6)', color: '#8EB69B' }}>
+                      <span className="text-sm font-medium text-[#DAF1DE]">Start studying to see your progress here</span>
+                      <span>Create a semester and add subjects to begin.</span>
+                    </div>
+                  )}
 
-              {/* Browse all */}
-              <button
-                className="flex items-center justify-between px-5 py-3.5 rounded-2xl text-sm font-medium transition-all group"
-                style={{ background: 'linear-gradient(135deg, #0d2030 0%, #111828 100%)', border: '1px solid rgba(168,212,220,0.12)', color: '#DAF1DE' }}
-                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(168,212,220,0.3)'; }}
-                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(168,212,220,0.12)'; }}
-              >
-                <div className="flex items-center gap-2">
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" style={{ color: '#8EB69B' }}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 6h16M4 10h16M4 14h16M4 18h16"/></svg>
-                  Browse All Subjects
+                  {/* View Learning Patterns → /brain */}
+                  <Link
+                    to="/brain"
+                    className="flex items-center justify-between px-5 py-3.5 rounded-2xl text-sm font-medium transition-all group"
+                    style={{ background: 'linear-gradient(135deg, #170d2a 0%, #12101e 100%)', border: '1px solid rgba(184,160,232,0.2)', color: '#DAF1DE', textDecoration: 'none' }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = 'rgba(184,160,232,0.45)'; (e.currentTarget as HTMLAnchorElement).style.boxShadow = '0 0 20px rgba(184,160,232,0.15)'; }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = 'rgba(184,160,232,0.2)'; (e.currentTarget as HTMLAnchorElement).style.boxShadow = 'none'; }}
+                  >
+                    <div className="flex items-center gap-2">
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" style={{ color: '#B8A0E8' }}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+                      <span style={{ background: 'linear-gradient(90deg, #DAF1DE, #B8A0E8)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>View Learning Patterns</span>
+                    </div>
+                    <svg className="h-4 w-4 group-hover:translate-x-0.5 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor" style={{ color: '#B8A0E8' }}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/></svg>
+                  </Link>
                 </div>
-                <svg className="h-4 w-4 group-hover:translate-x-0.5 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor" style={{ color: '#8EB69B' }}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/></svg>
-              </button>
-
-              {/* View Learning Patterns → /brain */}
-              <Link
-                to="/brain"
-                className="flex items-center justify-between px-5 py-3.5 rounded-2xl text-sm font-medium transition-all group"
-                style={{ background: 'linear-gradient(135deg, #170d2a 0%, #12101e 100%)', border: '1px solid rgba(184,160,232,0.2)', color: '#DAF1DE', textDecoration: 'none' }}
-                onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = 'rgba(184,160,232,0.45)'; (e.currentTarget as HTMLAnchorElement).style.boxShadow = '0 0 20px rgba(184,160,232,0.15)'; }}
-                onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.borderColor = 'rgba(184,160,232,0.2)'; (e.currentTarget as HTMLAnchorElement).style.boxShadow = 'none'; }}
-              >
-                <div className="flex items-center gap-2">
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" style={{ color: '#B8A0E8' }}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
-                  <span style={{ background: 'linear-gradient(90deg, #DAF1DE, #B8A0E8)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>View Learning Patterns</span>
-                </div>
-                <svg className="h-4 w-4 group-hover:translate-x-0.5 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor" style={{ color: '#B8A0E8' }}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/></svg>
-              </Link>
-            </div>
+              );
+            })()}
           </div>
 
         </div>
       </div>
+
+      {/* ── Add Exam Modal ── */}
+      {showAddExamModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+          <div
+            className="w-full max-w-md p-6 rounded-3xl flex flex-col gap-5 relative animate-in fade-in zoom-in duration-200"
+            style={{
+              background: 'linear-gradient(145deg, #0c1f20 0%, #0a1720 100%)',
+              border: '1px solid rgba(168,212,220,0.2)',
+              boxShadow: '0 0 40px rgba(0,0,0,0.8)',
+            }}
+          >
+            <div className="flex items-center justify-between pb-3 border-b border-white/10">
+              <h3 className="font-jakarta font-bold text-lg text-[#DAF1DE]">Schedule Upcoming Exam</h3>
+              <button
+                type="button"
+                onClick={() => setShowAddExamModal(false)}
+                className="text-xs text-[#8EB69B] hover:text-white transition-colors cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateExam} className="flex flex-col gap-4">
+              <div className="flex flex-col gap-1.5">
+                <label htmlFor="exam-subject-select" className="text-xs font-semibold text-[#8EB69B]">Select Subject</label>
+                <select
+                  id="exam-subject-select"
+                  required
+                  value={examSubjectId}
+                  onChange={(e) => setExamSubjectId(e.target.value)}
+                  style={{ backgroundColor: '#0A1A1B', border: '1px solid rgba(168,212,220,0.2)', color: '#DAF1DE' }}
+                  className="w-full px-4 py-3 rounded-xl text-sm focus:outline-none focus:border-teal-400 cursor-pointer"
+                >
+                  <option value="">-- Choose a Subject --</option>
+                  {allUserSubjects.map((s) => (
+                    <option key={s._id} value={s._id}>{s.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label htmlFor="exam-name-input" className="text-xs font-semibold text-[#8EB69B]">Exam Title / Name</label>
+                <input
+                  id="exam-name-input"
+                  type="text"
+                  required
+                  placeholder="e.g. Midterm Exam"
+                  value={examNameInput}
+                  onChange={(e) => setExamNameInput(e.target.value)}
+                  style={{ backgroundColor: '#0A1A1B', border: '1px solid rgba(168,212,220,0.2)', color: '#DAF1DE' }}
+                  className="w-full px-4 py-3 rounded-xl text-sm placeholder-[#235347] focus:outline-none focus:border-teal-400"
+                />
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label htmlFor="exam-date-input" className="text-xs font-semibold text-[#8EB69B]">Exam Date</label>
+                <input
+                  id="exam-date-input"
+                  type="date"
+                  required
+                  min={new Date().toISOString().split('T')[0]}
+                  value={examDateInput}
+                  onChange={(e) => setExamDateInput(e.target.value)}
+                  style={{ backgroundColor: '#0A1A1B', border: '1px solid rgba(168,212,220,0.2)', color: '#DAF1DE' }}
+                  className="w-full px-4 py-3 rounded-xl text-sm focus:outline-none focus:border-teal-400 cursor-pointer"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-white/10">
+                <button
+                  type="button"
+                  onClick={() => setShowAddExamModal(false)}
+                  className="px-4 py-2.5 rounded-xl text-sm font-medium text-[#8EB69B] hover:text-white transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={creatingExam || !examSubjectId || !examNameInput.trim() || !examDateInput}
+                  className="px-6 py-2.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-50 flex items-center gap-2 cursor-pointer hover:shadow-lg"
+                  style={{ background: 'linear-gradient(135deg, #A8D4DC 0%, #4EC9D4 100%)', color: '#040D0E', boxShadow: '0 0 15px rgba(168,212,220,0.25)' }}
+                >
+                  {creatingExam ? 'Saving...' : 'Save Exam'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

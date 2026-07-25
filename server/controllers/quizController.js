@@ -2,13 +2,15 @@ const axios = require('axios');
 const Material = require('../models/Material');
 const Quiz = require('../models/Quiz');
 const Subject = require('../models/Subject');
+const { getEmbeddings } = require('../services/embeddings');
+const { cosineSimilarity } = require('../services/similarity');
 
 // ── @desc   Generate multiple choice quiz questions for a subject
 // ── @route  POST /api/quiz/generate
 // ── @access Private
 const generateQuiz = async (req, res) => {
   try {
-    const { subjectId, difficulty = 'medium' } = req.body;
+    const { subjectId, difficulty = 'medium', topic } = req.body;
 
     if (!subjectId) {
       return res.status(400).json({ message: 'subjectId is required' });
@@ -24,9 +26,14 @@ const generateQuiz = async (req, res) => {
     }
 
     let allChunks = [];
+    let allEmbeddings = [];
+
     materials.forEach((mat) => {
       if (mat.chunks && mat.chunks.length > 0) {
         allChunks = allChunks.concat(mat.chunks);
+        if (mat.embeddings && mat.chunks.length === mat.embeddings.length) {
+          allEmbeddings = allEmbeddings.concat(mat.embeddings);
+        }
       }
     });
 
@@ -34,9 +41,30 @@ const generateQuiz = async (req, res) => {
       return res.status(400).json({ message: 'Study materials contain no text content to generate a quiz.' });
     }
 
-    const combinedText = allChunks.join('\n\n').slice(0, 8000);
+    let combinedText = '';
+    const hasTopic = typeof topic === 'string' && topic.trim().length > 0;
 
-    const systemPrompt = `You are an expert educational quiz generator. Generate 5 multiple-choice questions based ONLY on the provided study materials. The quiz difficulty must be: ${difficulty}.
+    if (hasTopic) {
+      const topicEmbeddings = await getEmbeddings([topic.trim()]);
+      const topicVector = topicEmbeddings[0];
+
+      if (topicVector && allEmbeddings.length > 0 && allChunks.length === allEmbeddings.length) {
+        const scoredChunks = allChunks.map((chunk, index) => {
+          const score = cosineSimilarity(topicVector, allEmbeddings[index]);
+          return { chunk, score };
+        });
+        scoredChunks.sort((a, b) => b.score - a.score);
+        const topChunks = scoredChunks.slice(0, 8).map((sc) => sc.chunk);
+        combinedText = topChunks.join('\n\n');
+      } else {
+        combinedText = allChunks.slice(0, 8).join('\n\n');
+      }
+    } else {
+      combinedText = allChunks.join('\n\n').slice(0, 8000);
+    }
+
+    const topicInstruction = hasTopic ? `specifically about: ${topic.trim()}` : 'based ONLY on the provided study materials';
+    const systemPrompt = `You are an expert educational quiz generator. Generate 5 multiple-choice questions ${topicInstruction}. The quiz difficulty must be: ${difficulty}.
 You MUST respond ONLY with a single valid JSON object. Do not include any explanations, introduction, or text outside of the raw JSON object.
 
 JSON structure required:
@@ -101,7 +129,7 @@ JSON structure required:
 // ── @access Private
 const generateExam = async (req, res) => {
   try {
-    const { subjectId, difficulty = 'medium' } = req.body;
+    const { subjectId, difficulty = 'medium', topic } = req.body;
 
     if (!subjectId) {
       return res.status(400).json({ message: 'subjectId is required' });
@@ -117,9 +145,14 @@ const generateExam = async (req, res) => {
     }
 
     let allChunks = [];
+    let allEmbeddings = [];
+
     materials.forEach((mat) => {
       if (mat.chunks && mat.chunks.length > 0) {
         allChunks = allChunks.concat(mat.chunks);
+        if (mat.embeddings && mat.chunks.length === mat.embeddings.length) {
+          allEmbeddings = allEmbeddings.concat(mat.embeddings);
+        }
       }
     });
 
@@ -127,9 +160,30 @@ const generateExam = async (req, res) => {
       return res.status(400).json({ message: 'Study materials contain no text content to generate an exam.' });
     }
 
-    const combinedText = allChunks.join('\n\n').slice(0, 8000);
+    let combinedText = '';
+    const hasTopic = typeof topic === 'string' && topic.trim().length > 0;
 
-    const systemPrompt = `You are an expert educational exam generator. Generate 15 multiple-choice questions based ONLY on the provided study materials, covering a broad range of topics from the material. The exam difficulty must be: ${difficulty}.
+    if (hasTopic) {
+      const topicEmbeddings = await getEmbeddings([topic.trim()]);
+      const topicVector = topicEmbeddings[0];
+
+      if (topicVector && allEmbeddings.length > 0 && allChunks.length === allEmbeddings.length) {
+        const scoredChunks = allChunks.map((chunk, index) => {
+          const score = cosineSimilarity(topicVector, allEmbeddings[index]);
+          return { chunk, score };
+        });
+        scoredChunks.sort((a, b) => b.score - a.score);
+        const topChunks = scoredChunks.slice(0, 8).map((sc) => sc.chunk);
+        combinedText = topChunks.join('\n\n');
+      } else {
+        combinedText = allChunks.slice(0, 8).join('\n\n');
+      }
+    } else {
+      combinedText = allChunks.join('\n\n').slice(0, 8000);
+    }
+
+    const topicInstruction = hasTopic ? `specifically about: ${topic.trim()}` : 'covering a broad range of topics from the material';
+    const systemPrompt = `You are an expert educational exam generator. Generate 15 multiple-choice questions ${topicInstruction}, based ONLY on the provided study materials. The exam difficulty must be: ${difficulty}.
 You MUST respond ONLY with a single valid JSON object. Do not include any explanations, introduction, or text outside of the raw JSON object.
 
 JSON structure required:
@@ -144,7 +198,7 @@ JSON structure required:
   ]
 }`;
 
-    const userPrompt = `Study Material:\n${combinedText}\n\nGenerate the 15 multiple choice questions covering a broad range of topics in JSON format now.`;
+    const userPrompt = `Study Material:\n${combinedText}\n\nGenerate the 15 multiple choice questions in JSON format now.`;
 
     const response = await axios.post(
       'https://api.groq.com/openai/v1/chat/completions',
@@ -194,7 +248,7 @@ JSON structure required:
 // ── @access Private
 const submitQuiz = async (req, res) => {
   try {
-    const { subjectId, questions, userAnswers, difficulty = 'medium', examMode = false, timeTakenSeconds = 0 } = req.body;
+    const { subjectId, questions, userAnswers, difficulty = 'medium', examMode = false, timeTakenSeconds = 0, topic = '' } = req.body;
 
     if (!subjectId || !questions || !Array.isArray(questions) || !userAnswers || !Array.isArray(userAnswers)) {
       return res.status(400).json({ message: 'subjectId, questions, and userAnswers are required' });
@@ -228,6 +282,7 @@ const submitQuiz = async (req, res) => {
       difficulty,
       examMode: Boolean(examMode),
       timeTakenSeconds: Number(timeTakenSeconds) || 0,
+      topic: topic || '',
     });
 
     const subject = await Subject.findById(subjectId);
@@ -246,12 +301,32 @@ const submitQuiz = async (req, res) => {
       }
     }
 
+    // Gamification Integration
+    const { addXP, updateStreak, checkAndAwardBadges } = require('../services/gamification');
+    const xpAmount = score >= 80 ? 50 : 20;
+    const xpResult = await addXP(req.userId, xpAmount);
+    const streakResult = await updateStreak(req.userId);
+
+    const quizzesTaken = await Quiz.countDocuments({ userId: req.userId });
+    const newBadges = await checkAndAwardBadges(req.userId, {
+      quizzesTaken,
+      score,
+      currentStreak: streakResult.currentStreak,
+    });
+
     return res.json({
       score,
       quizId: newQuiz._id,
       correctCount,
       totalQuestions,
       results,
+      xpAdded: xpAmount,
+      newXP: xpResult.newXP,
+      newLevel: xpResult.newLevel,
+      leveledUp: xpResult.leveledUp,
+      currentStreak: streakResult.currentStreak,
+      longestStreak: streakResult.longestStreak,
+      newBadges,
     });
   } catch (error) {
     console.error('Error in submitQuiz:', error.message);
@@ -259,4 +334,22 @@ const submitQuiz = async (req, res) => {
   }
 };
 
-module.exports = { generateQuiz, generateExam, submitQuiz };
+// ── @desc   Get all quiz attempt history for a subject
+// ── @route  GET /api/quiz/history/:subjectId
+// ── @access Private
+const getQuizHistory = async (req, res) => {
+  try {
+    const { subjectId } = req.params;
+    const history = await Quiz.find({
+      subjectId,
+      userId: req.userId,
+    }).sort({ takenAt: -1, createdAt: -1 });
+
+    return res.json(history);
+  } catch (error) {
+    console.error('Error in getQuizHistory:', error.message);
+    return res.status(500).json({ message: `Error fetching quiz history: ${error.message}` });
+  }
+};
+
+module.exports = { generateQuiz, generateExam, submitQuiz, getQuizHistory };
