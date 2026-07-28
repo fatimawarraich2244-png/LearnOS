@@ -8,6 +8,13 @@ import SubjectPage from './pages/Subject/SubjectPage';
 import StudySubject from './pages/Subject/StudySubject';
 import GlobalBrainPage from './pages/Brain/GlobalBrain';
 import ProgressReport from './pages/Reports/ProgressReport';
+import CalendarPage from './pages/Calendar/CalendarPage';
+import SemestersPage from './pages/Semesters/SemestersPage';
+import AllSubjectsPage from './pages/Subjects/AllSubjectsPage';
+import ExamsPage from './pages/Exams/ExamsPage';
+import QuizzesPage from './pages/Quizzes/QuizzesPage';
+import SettingsPage from './pages/Settings/SettingsPage';
+import HelpPage from './pages/Help/HelpPage';
 
 interface PrivateRouteProps {
   children: React.ReactNode;
@@ -18,12 +25,9 @@ const PrivateRoute: React.FC<PrivateRouteProps> = ({ children }) => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center space-y-4">
-        <svg className="animate-spin h-8 w-8 text-indigo-500" fill="none" viewBox="0 0 24 24">
-          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-        </svg>
-        <span className="text-slate-400 text-sm animate-pulse">Loading...</span>
+      <div className="min-h-screen bg-[#F0F4F7] flex flex-col items-center justify-center space-y-4">
+        <div className="animate-spin h-7 w-7 border-2 border-[#2E7C87] border-t-transparent rounded-full" />
+        <span className="text-[#6B7B85] text-xs font-medium animate-pulse">Loading LearnOS...</span>
       </div>
     );
   }
@@ -78,6 +82,62 @@ function App() {
           element={
             <PrivateRoute>
               <GlobalBrainPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/calendar"
+          element={
+            <PrivateRoute>
+              <CalendarPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/exams"
+          element={
+            <PrivateRoute>
+              <ExamsPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/quizzes"
+          element={
+            <PrivateRoute>
+              <QuizzesPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/settings"
+          element={
+            <PrivateRoute>
+              <SettingsPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/semesters"
+          element={
+            <PrivateRoute>
+              <SemestersPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/subjects"
+          element={
+            <PrivateRoute>
+              <AllSubjectsPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/help"
+          element={
+            <PrivateRoute>
+              <HelpPage />
             </PrivateRoute>
           }
         />

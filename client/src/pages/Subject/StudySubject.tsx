@@ -1,11 +1,36 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, Link, useLocation } from 'react-router-dom';
+import Sidebar from '../../components/Sidebar';
 // @ts-ignore
 import API from '../../api/axios';
-import { useAuth } from '../../context/AuthContext';
-import logo from '../../assets/logo.png';
 import confetti from 'canvas-confetti';
 import toast from 'react-hot-toast';
+import jsPDF from 'jspdf';
+import { sanitizeTextForPDF } from '../../utils/pdfSanitizer';
+import {
+  Clock,
+  Play,
+  Pause,
+  RotateCcw,
+  Check,
+  Brain,
+  Calendar,
+  Download,
+  UploadCloud,
+  FileText,
+  Trash2,
+  MessageSquare,
+  Send,
+  Sparkles,
+  ArrowLeft,
+  GraduationCap,
+  Mic,
+  MicOff,
+  Volume2,
+  VolumeX,
+  Trophy,
+  Award,
+} from 'lucide-react';
 
 interface TopicItem {
   name: string;
@@ -35,6 +60,7 @@ interface MaterialItem {
 interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
+  levelBadge?: string;
 }
 
 interface QuizQuestion {
@@ -101,13 +127,13 @@ const StudySubject: React.FC = () => {
 
   // Upload state
   const [isUploading, setIsUploading] = useState(false);
-  const [uploadStatus, setUploadStatus] = useState<{ type: 'uploading' | 'success' | 'error'; message: string } | null>(null);
+  const [, setUploadStatus] = useState<{ type: 'uploading' | 'success' | 'error'; message: string } | null>(null);
 
   // Chat state
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [currentQuestion, setCurrentQuestion] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
-  const [isStreaming, setIsStreaming] = useState(false);
+  const [, setIsStreaming] = useState(false);
   const [isConfusionMode, setIsConfusionMode] = useState(false);
   const [isFeynmanMode, setIsFeynmanMode] = useState(false);
   const [feynmanStep, setFeynmanStep] = useState<1 | 2>(1);
@@ -116,7 +142,8 @@ const StudySubject: React.FC = () => {
   type ExplainLevel = 'normal' | 'eli6' | 'highschool' | 'university' | 'exam' | 'interview';
   const [explainLevel, setExplainLevel] = useState<ExplainLevel>('normal');
   const chatEndRef = useRef<HTMLDivElement>(null);
-  // Voice Teaching (SpeechRecognition & SpeechSynthesis) state
+
+  // Voice Teaching
   const [isListening, setIsListening] = useState(false);
   const [speakingMsgIndex, setSpeakingMsgIndex] = useState<number | null>(null);
   const recognitionRef = useRef<any>(null);
@@ -125,12 +152,15 @@ const StudySubject: React.FC = () => {
   const isSpeechRecognitionSupported =
     typeof window !== 'undefined' && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window);
 
+  // Badge celebration modal
+  const [unlockedBadgesModal, setUnlockedBadgesModal] = useState<string[] | null>(null);
+
   // Quiz state
   const [quizDifficulty, setQuizDifficulty] = useState<'easy' | 'medium' | 'hard'>('medium');
   const [selectedQuizTopic, setSelectedQuizTopic] = useState('');
   const [quizViewMode, setQuizViewMode] = useState<QuizViewMode>('setup');
   const [quizLoading, setQuizLoading] = useState(false);
-  const [quizError, setQuizError] = useState('');
+  const [, setQuizError] = useState('');
   const [quizQuestions, setQuizQuestions] = useState<QuizQuestion[]>([]);
   const [userAnswers, setUserAnswers] = useState<string[]>([]);
   const [submittingQuiz, setSubmittingQuiz] = useState(false);
@@ -138,96 +168,44 @@ const StudySubject: React.FC = () => {
 
   // Exam Simulator state
   type ExamViewMode = 'setup' | 'taking' | 'results';
-  const [examDifficulty, setExamDifficulty] = useState<'easy' | 'medium' | 'hard'>('medium');
-  const [selectedExamTopic, setSelectedExamTopic] = useState('');
-  const [examViewMode, setExamViewMode] = useState<ExamViewMode>('setup');
+  const [examDifficulty] = useState<'easy' | 'medium' | 'hard'>('medium');
+  const [selectedExamTopic] = useState('');
+  const [, setExamViewMode] = useState<ExamViewMode>('setup');
   const [examLoading, setExamLoading] = useState(false);
-  const [examError, setExamError] = useState('');
+  const [, setExamError] = useState('');
   const [examQuestions, setExamQuestions] = useState<QuizQuestion[]>([]);
-  const [examUserAnswers, setExamUserAnswers] = useState<string[]>([]);
-  const [submittingExam, setSubmittingExam] = useState(false);
-  const [examResults, setExamResults] = useState<QuizResultsData | null>(null);
-  const [examTimeLimitMinutes, setExamTimeLimitMinutes] = useState(20);
-  const [examRemainingSeconds, setExamRemainingSeconds] = useState(20 * 60);
-  const [examTimeTakenSeconds, setExamTimeTakenSeconds] = useState(0);
+  const [, setExamUserAnswers] = useState<string[]>([]);
+  const [examUserAnswers] = useState<string[]>([]);
+  const [, setSubmittingExam] = useState(false);
+  const [, setExamResults] = useState<QuizResultsData | null>(null);
+
+  // Quiz History
+  const [, setQuizHistory] = useState<QuizHistoryItem[]>([]);
+  const [, setHistoryLoading] = useState(false);
+
+  // Timer state for Exam Simulator
+  const [examTimeRemaining, setExamTimeRemaining] = useState<number>(0);
   const examTimerIntervalRef = useRef<any>(null);
-  const examUserAnswersRef = useRef<string[]>([]);
-  const examRemainingSecondsRef = useRef<number>(20 * 60);
 
-  // Quiz History state
-  const [quizHistory, setQuizHistory] = useState<QuizHistoryItem[]>([]);
-  const [historyLoading, setHistoryLoading] = useState(false);
-  const [showQuizHistory, setShowQuizHistory] = useState(false);
-  const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null);
-
-  // Gamification Celebration State
-  const [xpPopups, setXpPopups] = useState<Array<{ id: number; amount: number }>>([]);
-  const [levelUpModal, setLevelUpModal] = useState<{ show: boolean; level: number } | null>(null);
-  const [badgeModal, setBadgeModal] = useState<{ show: boolean; badges: string[] } | null>(null);
-  const [perfectScoreToast, setPerfectScoreToast] = useState(false);
-
-  const BADGE_MAP: Record<string, { name: string; emoji: string }> = {
-    first_quiz: { name: 'First Steps', emoji: '🎯' },
-    quiz_master: { name: 'Quiz Master', emoji: '🏆' },
-    week_streak: { name: 'Week Warrior', emoji: '🔥' },
-    knowledge_seeker: { name: 'Knowledge Seeker', emoji: '🧠' },
-    perfect_score: { name: 'Perfectionist', emoji: '💯' },
-    night_owl: { name: 'Night Owl', emoji: '🦉' },
-  };
-
-  const triggerXpGain = (amount: number) => {
-    const id = Date.now() + Math.random();
-    setXpPopups((prev) => [...prev, { id, amount }]);
-    setTimeout(() => {
-      setXpPopups((prev) => prev.filter((p) => p.id !== id));
-    }, 2200);
-  };
-
-  const triggerConfetti = () => {
-    try {
-      confetti({
-        particleCount: 90,
-        spread: 70,
-        origin: { y: 0.6 },
-      });
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  const triggerPerfectScoreConfetti = () => {
+  const triggerConfettiEffect = () => {
     try {
       const end = Date.now() + 1500;
-      const colors = ['#4EC9D4', '#DAF1DE', '#fbbf24', '#f43f5e'];
+      const colors = ['#2E7C87', '#1E3A4A', '#F0F4F7', '#fbbf24'];
       (function frame() {
-        confetti({
-          particleCount: 6,
-          angle: 60,
-          spread: 60,
-          origin: { x: 0 },
-          colors,
-        });
-        confetti({
-          particleCount: 6,
-          angle: 120,
-          spread: 60,
-          origin: { x: 1 },
-          colors,
-        });
-        if (Date.now() < end) {
-          requestAnimationFrame(frame);
-        }
+        confetti({ particleCount: 6, angle: 60, spread: 60, origin: { x: 0 }, colors });
+        confetti({ particleCount: 6, angle: 120, spread: 60, origin: { x: 1 }, colors });
+        if (Date.now() < end) requestAnimationFrame(frame);
       })();
     } catch (e) {
       console.error(e);
     }
   };
 
-  // Study Timer state
+  // Timer State
   const [isTimerRunning, setIsTimerRunning] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [savingTimer, setSavingTimer] = useState(false);
-  const [timerMessage, setTimerMessage] = useState<{ type: 'info' | 'success' | 'error'; text: string } | null>(null);
+  const [, setTimerMessage] = useState<{ type: 'info' | 'success' | 'error'; text: string } | null>(null);
   const timerIntervalRef = useRef<any>(null);
 
   // Knowledge Map state
@@ -235,80 +213,66 @@ const StudySubject: React.FC = () => {
     initialSubject?.knowledgeMap || null
   );
   const [generatingMap, setGeneratingMap] = useState(false);
-  const [mapError, setMapError] = useState('');
+  const [, setMapError] = useState('');
 
   // Study Planner state
   const [studyPlan, setStudyPlan] = useState<StudyPlanData | null>(null);
   const [generatingPlan, setGeneratingPlan] = useState(false);
   const [planError, setPlanError] = useState('');
   const [examDateInput, setExamDateInput] = useState('');
-  const [hoursPerDayInput, setHoursPerDayInput] = useState(2);
+  const [hoursPerDayInput, setHoursPerDayInput] = useState<number>(2);
   const [showPlanSetup, setShowPlanSetup] = useState(false);
 
-  const { logoutUser } = useAuth();
-
-  // Scroll chat window to bottom when messages update
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, chatLoading]);
 
-  // Clean up timer interval on unmount
   useEffect(() => {
     return () => {
-      if (timerIntervalRef.current) {
-        clearInterval(timerIntervalRef.current);
+      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+      if (examTimerIntervalRef.current) clearInterval(examTimerIntervalRef.current);
+      if (recognitionRef.current) {
+        try { recognitionRef.current.stop(); } catch (e) {}
       }
-      if (examTimerIntervalRef.current) {
-        clearInterval(examTimerIntervalRef.current);
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
       }
     };
   }, []);
 
-  // Sync knowledge map if subject is loaded
   useEffect(() => {
-    if (subject?.knowledgeMap) {
-      setKnowledgeMapData(subject.knowledgeMap);
-    }
+    if (subject?.knowledgeMap) setKnowledgeMapData(subject.knowledgeMap);
   }, [subject]);
 
-  // Fetch subject details if not provided via location state
   useEffect(() => {
     const fetchSubjectDetails = async () => {
       if (!subjectId) return;
       try {
         const res = await API.get(`/subjects/single/${subjectId}`);
         setSubject(res.data);
-        if (res.data?.knowledgeMap) {
-          setKnowledgeMapData(res.data.knowledgeMap);
-        }
+        if (res.data?.knowledgeMap) setKnowledgeMapData(res.data.knowledgeMap);
       } catch (err) {
         console.error('Failed to fetch subject details', err);
       } finally {
         setLoadingSubject(false);
       }
     };
-
     fetchSubjectDetails();
   }, [subjectId]);
 
-  // Fetch existing study plan on mount
   useEffect(() => {
     const fetchStudyPlan = async () => {
       if (!subjectId) return;
       try {
         const res = await API.get(`/planner/${subjectId}`);
-        if (res.data) {
-          setStudyPlan(res.data);
-        }
+        if (res.data) setStudyPlan(res.data);
       } catch (err) {
         console.error('Failed to fetch study plan', err);
       }
     };
-
     fetchStudyPlan();
   }, [subjectId]);
 
-  // Fetch materials for subject
   useEffect(() => {
     const fetchMaterials = async () => {
       if (!subjectId) return;
@@ -321,11 +285,9 @@ const StudySubject: React.FC = () => {
         setLoadingMaterials(false);
       }
     };
-
     fetchMaterials();
   }, [subjectId]);
 
-  // Fetch Chat & Quiz History
   useEffect(() => {
     const fetchChatHistory = async () => {
       if (!subjectId) return;
@@ -336,7 +298,6 @@ const StudySubject: React.FC = () => {
         console.error('Failed to fetch chat history', err);
       }
     };
-
     fetchChatHistory();
     fetchQuizHistory();
   }, [subjectId]);
@@ -348,119 +309,118 @@ const StudySubject: React.FC = () => {
       const res = await API.get(`/quiz/history/${subjectId}`);
       setQuizHistory(res.data);
     } catch (err: any) {
-      console.error('Failed to fetch quiz history:', err);
+      console.error('Failed to fetch quiz history', err);
     } finally {
       setHistoryLoading(false);
     }
   };
 
-
-  // File upload handler
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !subjectId) return;
-
+    setIsUploading(true);
+    setUploadStatus({ type: 'uploading', message: 'Uploading and parsing document...' });
     const formData = new FormData();
     formData.append('file', file);
     formData.append('subjectId', subjectId);
-
-    setIsUploading(true);
-    setUploadStatus({ type: 'uploading', message: 'Uploading and embedding material...' });
-
     try {
-      const res = await API.post('/materials/upload', formData);
-      setUploadStatus({ type: 'success', message: `Successfully uploaded: ${file.name}` });
-      setMaterials((prev) => [res.data, ...prev]);
-      triggerXpGain(10);
-      toast.success(`Successfully uploaded: ${file.name}`);
+      const res = await API.post('/materials/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      // Backend returns the material object directly at top-level (res.data),
+      // not nested as res.data.material — support both shapes defensively.
+      const uploaded: MaterialItem = res.data?.material ?? res.data;
+      if (uploaded && uploaded._id) {
+        setMaterials((prev) => [uploaded, ...prev]);
+      } else {
+        // Response shape unrecognised — refresh the list from the server
+        const refreshed = await API.get(`/materials/${subjectId}`);
+        setMaterials(refreshed.data ?? []);
+      }
+      setUploadStatus({ type: 'success', message: 'Material processed and saved successfully!' });
+      toast.success('Material uploaded successfully');
+      e.target.value = '';
     } catch (err: any) {
-      const errMsg = err.response?.data?.message || 'Upload failed';
-      setUploadStatus({ type: 'error', message: errMsg });
-      toast.error(errMsg);
+      const msg = err.response?.data?.message || 'Failed to upload material';
+      setUploadStatus({ type: 'error', message: msg });
+      toast.error(msg);
     } finally {
       setIsUploading(false);
-      e.target.value = '';
     }
   };
 
-  // Delete material handler
   const handleDeleteMaterial = async (id: string) => {
-    const confirmed = window.confirm(
-      'Delete this material? This will also affect any quizzes/knowledge maps generated from it.'
-    );
-    if (!confirmed) return;
-
     try {
       await API.delete(`/materials/${id}`);
       setMaterials((prev) => prev.filter((m) => m._id !== id));
-      toast.success('Material deleted');
+      toast.success('Material deleted successfully');
     } catch (err: any) {
-      toast.error(err.response?.data?.message || 'Failed to delete material');
+      toast.error('Failed to delete material');
     }
   };
 
-  // Chat form submit handler
   const handleAskQuestion = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!currentQuestion.trim() || chatLoading || isStreaming || !subjectId) return;
-
-    const question = currentQuestion.trim();
-    const isLevelActive = explainLevel !== 'normal';
-    const isConfusion = isConfusionMode;
-
-    let userMessageContent = question;
-    if (isLevelActive) {
-      userMessageContent = `Explain ${question} at ${explainLevel} level`;
-    } else if (isConfusion) {
-      userMessageContent = `I'm confused about: ${question}`;
-    }
-
-    setMessages((prev) => [
-      ...prev,
-      { role: 'user', content: userMessageContent },
-      { role: 'assistant', content: '' },
-    ]);
+    if (!currentQuestion.trim() || !subjectId || chatLoading) return;
+    const questionText = currentQuestion.trim();
     setCurrentQuestion('');
     setChatLoading(true);
     setIsStreaming(true);
 
-    try {
-      let endpoint = '/chat/ask';
-      let payload: any = { subjectId, question };
+    const levelLabels: Record<ExplainLevel, string> = {
+      normal: '',
+      eli6: 'ELI6',
+      highschool: 'High School',
+      university: 'University',
+      exam: 'Exam Answer',
+      interview: 'Interview Answer',
+    };
 
-      if (isLevelActive) {
-        endpoint = '/chat/explain-level';
-        payload = { subjectId, topic: question, level: explainLevel };
-      } else if (isConfusion) {
+    const assistantBadge = explainLevel !== 'normal' ? levelLabels[explainLevel] : undefined;
+
+    const updatedMessages: ChatMessage[] = [
+      ...messages,
+      { role: 'user', content: questionText },
+      { role: 'assistant', content: '', levelBadge: assistantBadge },
+    ];
+    setMessages(updatedMessages);
+
+    try {
+      const token = localStorage.getItem('token');
+      const baseURL = API.defaults.baseURL || 'http://localhost:5000/api';
+
+      let endpoint = '/chat/ask';
+      let bodyPayload: any = { subjectId, question: questionText };
+
+      if (isConfusionMode) {
         endpoint = '/chat/confusion';
-        payload = { subjectId, confusedTopic: question };
+        bodyPayload = { subjectId, confusedTopic: questionText };
+      } else if (explainLevel !== 'normal') {
+        endpoint = '/chat/explain-level';
+        bodyPayload = { subjectId, topic: questionText, level: explainLevel };
       }
 
-      const token = localStorage.getItem('token');
-      const authHeader = token ? (token.startsWith('Bearer ') ? token : `Bearer ${token}`) : '';
-      const baseURL = API.defaults.baseURL || 'http://localhost:5000/api';
       const response = await fetch(`${baseURL}${endpoint}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': authHeader,
+          Authorization: token ? `Bearer ${token}` : '',
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(bodyPayload),
       });
 
-      if (!response.ok || !response.body) {
-        if (response.status === 429) {
-          const data = await response.json().catch(() => ({}));
-          const rateMsg = data.message || 'You have reached the hourly limit for AI requests. Please try again later.';
-          toast.error(rateMsg);
-          throw new Error(rateMsg);
-        }
-        throw new Error(`Server returned status ${response.status}`);
+      if (!response.ok) {
+        let errMessage = 'Failed to fetch AI response';
+        try {
+          const errData = await response.json();
+          errMessage = errData.message || errMessage;
+        } catch (_) {}
+        throw new Error(errMessage);
       }
 
-      setChatLoading(false);
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('ReadableStream not supported by browser.');
 
-      const reader = response.body.getReader();
       const decoder = new TextDecoder('utf-8');
       let done = false;
       let buffer = '';
@@ -472,68 +432,38 @@ const StudySubject: React.FC = () => {
           buffer += decoder.decode(value, { stream: !done });
           const lines = buffer.split('\n');
           buffer = lines.pop() || '';
-
           for (const line of lines) {
             const trimmed = line.trim();
             if (!trimmed || !trimmed.startsWith('data:')) continue;
-            if (trimmed === 'data: [DONE]') {
-              done = true;
-              break;
-            }
+            if (trimmed === 'data: [DONE]') { done = true; break; }
             try {
               const jsonStr = trimmed.replace(/^data:\s*/, '');
               const data = JSON.parse(jsonStr);
               if (data.content) {
-                const chunkText = data.content;
                 setMessages((prev) => {
                   const newMsgs = [...prev];
                   const lastIdx = newMsgs.length - 1;
                   if (lastIdx >= 0 && newMsgs[lastIdx].role === 'assistant') {
                     newMsgs[lastIdx] = {
                       ...newMsgs[lastIdx],
-                      content: newMsgs[lastIdx].content + chunkText,
+                      content: newMsgs[lastIdx].content + data.content,
                     };
                   }
                   return newMsgs;
                 });
               }
             } catch (err) {
-              console.error('Error parsing SSE line:', err);
+              console.error('Error parsing SSE:', err);
             }
           }
         }
       }
-
-      if (buffer.trim().startsWith('data:') && buffer.trim() !== 'data: [DONE]') {
-        try {
-          const jsonStr = buffer.trim().replace(/^data:\s*/, '');
-          const data = JSON.parse(jsonStr);
-          if (data.content) {
-            setMessages((prev) => {
-              const newMsgs = [...prev];
-              const lastIdx = newMsgs.length - 1;
-              if (lastIdx >= 0 && newMsgs[lastIdx].role === 'assistant') {
-                newMsgs[lastIdx] = {
-                  ...newMsgs[lastIdx],
-                  content: newMsgs[lastIdx].content + data.content,
-                };
-              }
-              return newMsgs;
-            });
-          }
-        } catch (e) {}
-      }
-
-      triggerXpGain(5);
     } catch (err: any) {
       setMessages((prev) => {
         const newMsgs = [...prev];
         const lastIdx = newMsgs.length - 1;
         if (lastIdx >= 0 && newMsgs[lastIdx].role === 'assistant' && !newMsgs[lastIdx].content) {
-          newMsgs[lastIdx] = {
-            role: 'assistant',
-            content: err.message || 'Sorry, something went wrong answering your request.',
-          };
+          newMsgs[lastIdx] = { role: 'assistant', content: err.message || 'Error occurred.' };
         }
         return newMsgs;
       });
@@ -543,54 +473,55 @@ const StudySubject: React.FC = () => {
     }
   };
 
-  // Feynman mode submit handler
-  const handleFeynmanSubmit = async (e: React.FormEvent) => {
+  const handleStartFeynman = (topicToTeach: string) => {
+    if (!topicToTeach.trim()) return;
+    setFeynmanTopic(topicToTeach.trim());
+    setFeynmanStep(2);
+    setFeynmanExplanation('');
+  };
+
+  const handleEvaluateFeynman = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!feynmanTopic.trim() || !feynmanExplanation.trim() || chatLoading || isStreaming || !subjectId) return;
-
-    const topic = feynmanTopic.trim();
-    const explanation = feynmanExplanation.trim();
-    const rawUserContent = `Teaching: ${topic} - ${explanation}`;
-    const userMessageContent = rawUserContent.length > 300 ? rawUserContent.slice(0, 300) + '...' : rawUserContent;
-
-    setMessages((prev) => [
-      ...prev,
-      { role: 'user', content: userMessageContent },
-      { role: 'assistant', content: '' },
-    ]);
+    if (!feynmanTopic || !feynmanExplanation.trim() || !subjectId || chatLoading) return;
     setChatLoading(true);
     setIsStreaming(true);
 
+    const userTeachingText = `Teaching: ${feynmanTopic}\n\nExplanation:\n${feynmanExplanation.trim()}`;
+    const updatedMessages: ChatMessage[] = [
+      ...messages,
+      { role: 'user', content: userTeachingText },
+      { role: 'assistant', content: '', levelBadge: 'Feynman Evaluation' },
+    ];
+    setMessages(updatedMessages);
+
     try {
       const token = localStorage.getItem('token');
-      const authHeader = token ? (token.startsWith('Bearer ') ? token : `Bearer ${token}`) : '';
       const baseURL = API.defaults.baseURL || 'http://localhost:5000/api';
       const response = await fetch(`${baseURL}/chat/feynman`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': authHeader,
+          Authorization: token ? `Bearer ${token}` : '',
         },
         body: JSON.stringify({
           subjectId,
-          topic,
-          studentExplanation: explanation,
+          topic: feynmanTopic,
+          studentExplanation: feynmanExplanation.trim(),
         }),
       });
 
-      if (!response.ok || !response.body) {
-        if (response.status === 429) {
-          const data = await response.json().catch(() => ({}));
-          const rateMsg = data.message || 'You have reached the hourly limit for AI requests. Please try again later.';
-          toast.error(rateMsg);
-          throw new Error(rateMsg);
-        }
-        throw new Error(`Server returned status ${response.status}`);
+      if (!response.ok) {
+        let errMessage = 'Failed to evaluate explanation';
+        try {
+          const errData = await response.json();
+          errMessage = errData.message || errMessage;
+        } catch (_) {}
+        throw new Error(errMessage);
       }
 
-      setChatLoading(false);
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('Stream reader error');
 
-      const reader = response.body.getReader();
       const decoder = new TextDecoder('utf-8');
       let done = false;
       let buffer = '';
@@ -602,56 +533,29 @@ const StudySubject: React.FC = () => {
           buffer += decoder.decode(value, { stream: !done });
           const lines = buffer.split('\n');
           buffer = lines.pop() || '';
-
           for (const line of lines) {
             const trimmed = line.trim();
             if (!trimmed || !trimmed.startsWith('data:')) continue;
-            if (trimmed === 'data: [DONE]') {
-              done = true;
-              break;
-            }
+            if (trimmed === 'data: [DONE]') { done = true; break; }
             try {
               const jsonStr = trimmed.replace(/^data:\s*/, '');
               const data = JSON.parse(jsonStr);
               if (data.content) {
-                const chunkText = data.content;
                 setMessages((prev) => {
                   const newMsgs = [...prev];
                   const lastIdx = newMsgs.length - 1;
                   if (lastIdx >= 0 && newMsgs[lastIdx].role === 'assistant') {
                     newMsgs[lastIdx] = {
                       ...newMsgs[lastIdx],
-                      content: newMsgs[lastIdx].content + chunkText,
+                      content: newMsgs[lastIdx].content + data.content,
                     };
                   }
                   return newMsgs;
                 });
               }
-            } catch (err) {
-              console.error('Error parsing SSE line:', err);
-            }
+            } catch (err) {}
           }
         }
-      }
-
-      if (buffer.trim().startsWith('data:') && buffer.trim() !== 'data: [DONE]') {
-        try {
-          const jsonStr = buffer.trim().replace(/^data:\s*/, '');
-          const data = JSON.parse(jsonStr);
-          if (data.content) {
-            setMessages((prev) => {
-              const newMsgs = [...prev];
-              const lastIdx = newMsgs.length - 1;
-              if (lastIdx >= 0 && newMsgs[lastIdx].role === 'assistant') {
-                newMsgs[lastIdx] = {
-                  ...newMsgs[lastIdx],
-                  content: newMsgs[lastIdx].content + data.content,
-                };
-              }
-              return newMsgs;
-            });
-          }
-        } catch (e) {}
       }
 
       setFeynmanExplanation('');
@@ -662,10 +566,7 @@ const StudySubject: React.FC = () => {
         const newMsgs = [...prev];
         const lastIdx = newMsgs.length - 1;
         if (lastIdx >= 0 && newMsgs[lastIdx].role === 'assistant' && !newMsgs[lastIdx].content) {
-          newMsgs[lastIdx] = {
-            role: 'assistant',
-            content: err.message || 'Sorry, something went wrong evaluating your explanation.',
-          };
+          newMsgs[lastIdx] = { role: 'assistant', content: err.message || 'Error evaluating explanation.' };
         }
         return newMsgs;
       });
@@ -689,23 +590,20 @@ const StudySubject: React.FC = () => {
       window.speechSynthesis.cancel();
       setSpeakingMsgIndex(null);
     }
-    if (recognitionRef.current) {
-      try { recognitionRef.current.stop(); } catch (e) {}
-      setIsListening(false);
-    }
     if (!isFeynmanMode) {
       setIsFeynmanMode(true);
       setIsConfusionMode(false);
       setFeynmanStep(1);
     } else {
       setIsFeynmanMode(false);
-      setFeynmanStep(1);
     }
   };
 
-  const handleToggleListening = () => {
-    if (!isSpeechRecognitionSupported) return;
-
+  const handleToggleVoiceInput = () => {
+    if (!isSpeechRecognitionSupported) {
+      toast.error('Voice input is not supported in this browser. Please try Chrome or Edge.');
+      return;
+    }
     if (isListening) {
       if (recognitionRef.current) {
         try { recognitionRef.current.stop(); } catch (e) {}
@@ -714,385 +612,82 @@ const StudySubject: React.FC = () => {
       return;
     }
 
-    const SpeechRecognitionClass = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognitionClass) return;
-
-    const recognition = new SpeechRecognitionClass();
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    const recognition = new SpeechRecognition();
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = 'en-US';
 
-    baseTranscriptRef.current = feynmanExplanation ? (feynmanExplanation.trim() + ' ') : '';
+    baseTranscriptRef.current = isFeynmanMode ? feynmanExplanation : currentQuestion;
 
     recognition.onresult = (event: any) => {
-      let finalTranscript = '';
       let interimTranscript = '';
-
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const chunk = event.results[i][0].transcript;
-        if (event.results[i].isFinal) {
-          finalTranscript += chunk;
-        } else {
-          interimTranscript += chunk;
-        }
+      let finalTranscript = '';
+      for (let i = 0; i < event.results.length; ++i) {
+        if (event.results[i].isFinal) finalTranscript += event.results[i][0].transcript;
+        else interimTranscript += event.results[i][0].transcript;
       }
-
-      const combined = baseTranscriptRef.current + (finalTranscript || interimTranscript);
-      setFeynmanExplanation(combined);
-      if (finalTranscript) {
-        baseTranscriptRef.current += finalTranscript + ' ';
-      }
+      const combined = (baseTranscriptRef.current ? baseTranscriptRef.current + ' ' : '') + finalTranscript + interimTranscript;
+      if (isFeynmanMode) setFeynmanExplanation(combined);
+      else setCurrentQuestion(combined);
     };
 
     recognition.onerror = (event: any) => {
-      console.error('Speech recognition error:', event.error);
       setIsListening(false);
-      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-        toast.error('Microphone access denied — please allow microphone permissions in your browser settings');
+      if (event.error === 'not-allowed' || event.error === 'permission-denied') {
+        toast.error('Microphone access denied. Please allow microphone permissions in your browser.');
       } else if (event.error === 'no-speech') {
         toast.error('No speech detected. Please try speaking again.');
+      } else if (event.error === 'audio-capture') {
+        toast.error('No microphone detected. Please connect a microphone.');
       } else {
         toast.error(`Voice input error: ${event.error}`);
       }
     };
 
-    recognition.onend = () => {
-      setIsListening(false);
-    };
-
+    recognition.onend = () => setIsListening(false);
     recognitionRef.current = recognition;
+
     try {
       recognition.start();
       setIsListening(true);
     } catch (err) {
-      console.error('Failed to start speech recognition:', err);
+      console.error('Failed voice input:', err);
     }
   };
 
-  const stripMarkdown = (text: string) => {
-    return text
-      .replace(/^#{1,6}\s+/gm, '')
-      .replace(/\*\*(.*?)\*\*/g, '$1')
-      .replace(/\*(.*?)\*/g, '$1')
-      .replace(/`(.*?)`/g, '$1')
-      .replace(/\[(.*?)\]\(.*?\)/g, '$1')
-      .replace(/^[*-]\s+/gm, '')
+  const cleanMarkdownForTTS = (md: string) => {
+    return md
+      .replace(/```[\s\S]*?```/g, '')
+      .replace(/`([^`]+)`/g, '$1')
+      .replace(/#{1,6}\s+/g, '')
+      .replace(/\*\*([^*]+)\*\*/g, '$1')
+      .replace(/\*([^*]+)\*/g, '$1')
+      .replace(/_([^_]+)_/g, '$1')
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      .replace(/^[\s*->+-]+/gm, '')
       .trim();
   };
 
-  const handleToggleSpeak = (msgIndex: number, text: string) => {
+  const handleReadAloud = (text: string, msgIndex: number) => {
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
-      toast.error('Text-to-speech not supported in this browser.');
+      toast.error('Text-to-speech is not supported in this browser.');
       return;
     }
-
     if (speakingMsgIndex === msgIndex) {
       window.speechSynthesis.cancel();
       setSpeakingMsgIndex(null);
       return;
     }
-
     window.speechSynthesis.cancel();
-
-    const cleanText = stripMarkdown(text);
+    const cleanText = cleanMarkdownForTTS(text);
     const utterance = new SpeechSynthesisUtterance(cleanText);
-    utterance.lang = 'en-US';
-    utterance.rate = 1.0;
-
-    utterance.onend = () => {
-      setSpeakingMsgIndex(null);
-    };
-
-    utterance.onerror = (e) => {
-      console.error('Speech synthesis error:', e);
-      setSpeakingMsgIndex(null);
-    };
-
+    utterance.onend = () => setSpeakingMsgIndex(null);
+    utterance.onerror = () => setSpeakingMsgIndex(null);
     setSpeakingMsgIndex(msgIndex);
     window.speechSynthesis.speak(utterance);
   };
 
-  const getKnowledgeMapTopicOptions = () => {
-    const map = subject?.knowledgeMap || initialSubject?.knowledgeMap;
-    if (!map || !map.topics || !Array.isArray(map.topics) || map.topics.length === 0) {
-      return [];
-    }
-    const list: string[] = [];
-    map.topics.forEach((t) => {
-      if (t.name && !list.includes(t.name)) {
-        list.push(t.name);
-      }
-      if (t.subtopics && Array.isArray(t.subtopics)) {
-        t.subtopics.forEach((st) => {
-          if (st && !list.includes(st)) {
-            list.push(st);
-          }
-        });
-      }
-    });
-    return list;
-  };
-
-  // Generate Quiz handler
-  const handleGenerateQuiz = async () => {
-    if (!subjectId) return;
-    setQuizLoading(true);
-    setQuizError('');
-
-    try {
-      const payload: any = { subjectId, difficulty: quizDifficulty };
-      if (selectedQuizTopic) {
-        payload.topic = selectedQuizTopic;
-      }
-      const res = await API.post('/quiz/generate', payload);
-      const questions: QuizQuestion[] = res.data.questions || [];
-      setQuizQuestions(questions);
-      setUserAnswers(new Array(questions.length).fill(''));
-      setQuizViewMode('taking');
-    } catch (err: any) {
-      const errMsg = err.response?.status === 429
-        ? (err.response?.data?.message || 'You have reached the hourly limit for AI requests. Please try again later.')
-        : (err.response?.data?.message || 'Failed to generate quiz. Please check that you have uploaded materials.');
-      setQuizError(errMsg);
-      toast.error(errMsg);
-    } finally {
-      setQuizLoading(false);
-    }
-  };
-
-  // Select Option handler
-  const handleSelectOption = (questionIndex: number, option: string) => {
-    setUserAnswers((prev) => {
-      const next = [...prev];
-      next[questionIndex] = option;
-      return next;
-    });
-  };
-
-  // Submit Quiz handler
-  const handleSubmitQuiz = async () => {
-    if (!subjectId || quizQuestions.length === 0) return;
-    setSubmittingQuiz(true);
-    setQuizError('');
-
-    try {
-      const payload: any = {
-        subjectId,
-        questions: quizQuestions,
-        userAnswers,
-        difficulty: quizDifficulty,
-      };
-      if (selectedQuizTopic) {
-        payload.topic = selectedQuizTopic;
-      }
-      const res = await API.post('/quiz/submit', payload);
-      const data = res.data;
-      setQuizResults(data);
-      setQuizViewMode('results');
-      fetchQuizHistory();
-
-      // Gamification Effects
-      const xp = data.xpAdded || (data.score >= 80 ? 50 : 20);
-      triggerXpGain(xp);
-
-      if (data.score === 100) {
-        setPerfectScoreToast(true);
-        triggerPerfectScoreConfetti();
-        setTimeout(() => setPerfectScoreToast(false), 4500);
-      } else if (data.leveledUp || (data.newBadges && data.newBadges.length > 0)) {
-        triggerConfetti();
-      }
-
-      if (data.leveledUp) {
-        triggerConfetti();
-        setLevelUpModal({ show: true, level: data.newLevel || 2 });
-        setTimeout(() => setLevelUpModal(null), 3500);
-      }
-
-      if (data.newBadges && data.newBadges.length > 0) {
-        triggerConfetti();
-        setBadgeModal({ show: true, badges: data.newBadges });
-        setTimeout(() => setBadgeModal(null), 4500);
-      }
-      toast.success('Quiz completed successfully!');
-    } catch (err: any) {
-      const errMsg = err.response?.data?.message || 'Failed to submit quiz. Please try again.';
-      setQuizError(errMsg);
-      toast.error(errMsg);
-    } finally {
-      setSubmittingQuiz(false);
-    }
-  };
-
-  // Reset Quiz handler
-  const handleResetQuiz = () => {
-    setQuizViewMode('setup');
-    setQuizQuestions([]);
-    setUserAnswers([]);
-    setQuizResults(null);
-    setQuizError('');
-  };
-
-  // Exam Simulator Handlers
-  const handleStartExam = async () => {
-    if (!subjectId) return;
-    setExamLoading(true);
-    setExamError('');
-
-    try {
-      const payload: any = { subjectId, difficulty: examDifficulty };
-      if (selectedExamTopic) {
-        payload.topic = selectedExamTopic;
-      }
-      const res = await API.post('/quiz/generate-exam', payload);
-      const questions: QuizQuestion[] = res.data.questions || [];
-      const timeLimitMins = res.data.timeLimit || 20;
-      const initialSecs = timeLimitMins * 60;
-
-      setExamQuestions(questions);
-      setExamTimeLimitMinutes(timeLimitMins);
-      setExamRemainingSeconds(initialSecs);
-      examRemainingSecondsRef.current = initialSecs;
-
-      const emptyAnswers = new Array(questions.length).fill('');
-      setExamUserAnswers(emptyAnswers);
-      examUserAnswersRef.current = emptyAnswers;
-
-      setExamViewMode('taking');
-
-      if (examTimerIntervalRef.current) {
-        clearInterval(examTimerIntervalRef.current);
-      }
-
-      examTimerIntervalRef.current = setInterval(() => {
-        setExamRemainingSeconds((prev) => {
-          if (prev <= 1) {
-            if (examTimerIntervalRef.current) {
-              clearInterval(examTimerIntervalRef.current);
-              examTimerIntervalRef.current = null;
-            }
-            handleSubmitExam(examUserAnswersRef.current, initialSecs);
-            return 0;
-          }
-          const nextSecs = prev - 1;
-          examRemainingSecondsRef.current = nextSecs;
-          return nextSecs;
-        });
-      }, 1000);
-    } catch (err: any) {
-      const errMsg = err.response?.status === 429
-        ? (err.response?.data?.message || 'You have reached the hourly limit for AI requests. Please try again later.')
-        : (err.response?.data?.message || 'Failed to prepare exam. Please ensure study materials are uploaded.');
-      setExamError(errMsg);
-      toast.error(errMsg);
-    } finally {
-      setExamLoading(false);
-    }
-  };
-
-  const handleSelectExamOption = (questionIndex: number, option: string) => {
-    setExamUserAnswers((prev) => {
-      const next = [...prev];
-      next[questionIndex] = option;
-      examUserAnswersRef.current = next;
-      return next;
-    });
-  };
-
-  const handleSubmitExam = async (overrideAnswers?: string[], forcedTotalSecs?: number) => {
-    if (!subjectId || examQuestions.length === 0) return;
-
-    if (examTimerIntervalRef.current) {
-      clearInterval(examTimerIntervalRef.current);
-      examTimerIntervalRef.current = null;
-    }
-
-    setSubmittingExam(true);
-    setExamError('');
-
-    const answersToSubmit = overrideAnswers || examUserAnswersRef.current || examUserAnswers;
-    const totalLimitSecs = forcedTotalSecs || (examTimeLimitMinutes * 60);
-    const timeTaken = Math.max(0, totalLimitSecs - examRemainingSecondsRef.current);
-    setExamTimeTakenSeconds(timeTaken);
-
-    try {
-      const payload: any = {
-        subjectId,
-        questions: examQuestions,
-        userAnswers: answersToSubmit,
-        difficulty: examDifficulty,
-        examMode: true,
-        timeTakenSeconds: timeTaken,
-      };
-      if (selectedExamTopic) {
-        payload.topic = selectedExamTopic;
-      }
-      const res = await API.post('/quiz/submit', payload);
-      const data = res.data;
-      setExamResults(data);
-      setExamViewMode('results');
-      fetchQuizHistory();
-
-      // Gamification Effects
-      const xp = data.xpAdded || (data.score >= 80 ? 50 : 20);
-      triggerXpGain(xp);
-
-      if (data.score === 100) {
-        setPerfectScoreToast(true);
-        triggerPerfectScoreConfetti();
-        setTimeout(() => setPerfectScoreToast(false), 4500);
-      } else if (data.leveledUp || (data.newBadges && data.newBadges.length > 0)) {
-        triggerConfetti();
-      }
-
-      if (data.leveledUp) {
-        triggerConfetti();
-        setLevelUpModal({ show: true, level: data.newLevel || 2 });
-        setTimeout(() => setLevelUpModal(null), 3500);
-      }
-
-      if (data.newBadges && data.newBadges.length > 0) {
-        triggerConfetti();
-        setBadgeModal({ show: true, badges: data.newBadges });
-        setTimeout(() => setBadgeModal(null), 4500);
-      }
-      toast.success('Exam submitted successfully!');
-    } catch (err: any) {
-      const errMsg = err.response?.data?.message || 'Failed to submit exam. Please try again.';
-      setExamError(errMsg);
-      toast.error(errMsg);
-    } finally {
-      setSubmittingExam(false);
-    }
-  };
-
-  const handleResetExam = () => {
-    if (examTimerIntervalRef.current) {
-      clearInterval(examTimerIntervalRef.current);
-      examTimerIntervalRef.current = null;
-    }
-    setExamViewMode('setup');
-    setExamQuestions([]);
-    setExamUserAnswers([]);
-    examUserAnswersRef.current = [];
-    setExamResults(null);
-    setExamError('');
-  };
-
-  const formatTimerMMSS = (totalSecs: number) => {
-    const mins = Math.floor(totalSecs / 60);
-    const secs = totalSecs % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  const formatExamTimeTaken = (totalSecs: number) => {
-    const mins = Math.floor(totalSecs / 60);
-    const secs = totalSecs % 60;
-    if (mins === 0) return `${secs} second${secs !== 1 ? 's' : ''}`;
-    return `${mins} min${mins !== 1 ? 's' : ''} ${secs} sec${secs !== 1 ? 's' : ''}`;
-  };
-
-  // Timer Handlers
   const handleToggleTimer = () => {
     if (isTimerRunning) {
       if (timerIntervalRef.current) {
@@ -1115,7 +710,6 @@ const StudySubject: React.FC = () => {
       timerIntervalRef.current = null;
     }
     setIsTimerRunning(false);
-
     const minutes = Math.round(elapsedSeconds / 60);
 
     if (minutes < 1) {
@@ -1123,9 +717,7 @@ const StudySubject: React.FC = () => {
       toast.error('Study for at least 1 minute to log time');
       return;
     }
-
     if (!subjectId) return;
-
     setSavingTimer(true);
     setTimerMessage(null);
 
@@ -1144,12 +736,10 @@ const StudySubject: React.FC = () => {
     }
   };
 
-  // Generate Knowledge Map Handler
   const handleGenerateKnowledgeMap = async () => {
     if (!subjectId) return;
     setGeneratingMap(true);
     setMapError('');
-
     try {
       const res = await API.post(`/subjects/${subjectId}/knowledge-map`);
       const mapData = res.data.knowledgeMap;
@@ -1157,9 +747,7 @@ const StudySubject: React.FC = () => {
       setSubject((prev) => (prev ? { ...prev, knowledgeMap: mapData } : prev));
       toast.success('Knowledge Map generated successfully!');
     } catch (err: any) {
-      const errMsg = err.response?.status === 429
-        ? (err.response?.data?.message || 'You have reached the hourly limit for AI requests. Please try again later.')
-        : (err.response?.data?.message || 'Failed to generate Knowledge Map. Make sure you have uploaded study materials.');
+      const errMsg = err.response?.data?.message || 'Failed to generate Knowledge Map.';
       setMapError(errMsg);
       toast.error(errMsg);
     } finally {
@@ -1167,14 +755,11 @@ const StudySubject: React.FC = () => {
     }
   };
 
-  // Generate Study Plan Handler
   const handleGeneratePlan = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!subjectId || !examDateInput || !hoursPerDayInput) return;
-
     setGeneratingPlan(true);
     setPlanError('');
-
     try {
       const res = await API.post('/planner/generate', {
         subjectId,
@@ -1183,11 +768,9 @@ const StudySubject: React.FC = () => {
       });
       setStudyPlan(res.data.plan);
       setShowPlanSetup(false);
-      toast.success('Study plan generated successfully!');
+      toast.success('AI Study Plan generated successfully!');
     } catch (err: any) {
-      const errMsg = err.response?.status === 429
-        ? (err.response?.data?.message || 'You have reached the hourly limit for AI requests. Please try again later.')
-        : (err.response?.data?.message || 'Failed to generate study plan. Please ensure you have generated a knowledge map.');
+      const errMsg = err.response?.data?.message || 'Failed to generate study plan.';
       setPlanError(errMsg);
       toast.error(errMsg);
     } finally {
@@ -1195,2090 +778,1088 @@ const StudySubject: React.FC = () => {
     }
   };
 
-  const handleCreateNewPlan = () => {
-    setShowPlanSetup(true);
+  const handleExportPlanPDF = () => {
+    if (!studyPlan || !studyPlan.schedule || studyPlan.schedule.length === 0) return;
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    const subjectName = subject?.name || 'Subject';
+    const examDateStr = new Date(studyPlan.examDate).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+
+    const cleanTitle = sanitizeTextForPDF(`AI Study Plan - ${subjectName}`);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(18);
+    doc.setTextColor(0, 128, 128);
+    doc.text(cleanTitle, 14, 20);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(11);
+    doc.setTextColor(90, 90, 90);
+    doc.text(`Target Exam Date: ${examDateStr}  |  Daily Goal: ${studyPlan.hoursPerDay} hours/day`, 14, 28);
+
+    doc.setDrawColor(200, 200, 200);
+    doc.setLineWidth(0.5);
+    doc.line(14, 32, 196, 32);
+
+    let y = 40;
+    studyPlan.schedule.forEach((item, idx) => {
+      if (y > 260) {
+        doc.addPage();
+        y = 20;
+      }
+      const itemDate = new Date(item.date).toLocaleDateString('en-US', {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+      });
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(30, 58, 74);
+      doc.text(`Day ${idx + 1} (${itemDate}) - ${item.durationMinutes} mins`, 14, y);
+      y += 6;
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      doc.setTextColor(70, 70, 70);
+      const rawTopics = item.topics && item.topics.length > 0 ? item.topics.join(', ') : 'General study & review';
+      const cleanTopics = sanitizeTextForPDF(`Topics: ${rawTopics}`);
+      const splitTopics = doc.splitTextToSize(cleanTopics, 175);
+      doc.text(splitTopics, 18, y);
+      y += splitTopics.length * 5 + 4;
+    });
+
+    const sanitizedSubj = subjectName.replace(/[^a-zA-Z0-9]/g, '_');
+    doc.save(`StudyPlan-${sanitizedSubj}.pdf`);
+    toast.success('Study Plan PDF exported!');
   };
 
-  // Format Timer Display: MM:SS or HH:MM:SS
+  const getDaysUntilExam = (dateStr: string) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const exam = new Date(dateStr);
+    exam.setHours(0, 0, 0, 0);
+    const diff = exam.getTime() - today.getTime();
+    return Math.ceil(diff / (1000 * 60 * 60 * 24));
+  };
+
+  const handleGenerateQuiz = async () => {
+    if (!subjectId) return;
+    setQuizLoading(true);
+    setQuizError('');
+    try {
+      const payload: any = { subjectId, difficulty: quizDifficulty };
+      if (selectedQuizTopic) payload.topic = selectedQuizTopic;
+      const res = await API.post('/quiz/generate', payload);
+      const questions: QuizQuestion[] = res.data.questions || [];
+      setQuizQuestions(questions);
+      setUserAnswers(new Array(questions.length).fill(''));
+      setQuizViewMode('taking');
+      toast.success('Quiz generated!');
+    } catch (err: any) {
+      setQuizError(err.response?.data?.message || 'Failed to generate quiz.');
+      toast.error('Failed to generate quiz');
+    } finally {
+      setQuizLoading(false);
+    }
+  };
+
+  const handleSelectQuizOption = (questionIndex: number, option: string) => {
+    setUserAnswers((prev) => {
+      const next = [...prev];
+      next[questionIndex] = option;
+      console.log('[DEBUG Handoff 1 Frontend Option Selected]', { questionIndex, option, updatedAnswers: next });
+      return next;
+    });
+  };
+
+  const handleSubmitQuiz = async () => {
+    if (!subjectId) return;
+    setSubmittingQuiz(true);
+    const payload = {
+      subjectId,
+      difficulty: quizDifficulty,
+      topic: selectedQuizTopic || undefined,
+      questions: quizQuestions,
+      userAnswers: userAnswers,
+    };
+    console.log('[DEBUG Handoff 2 Frontend Submit Quiz Payload]', payload);
+    try {
+      const res = await API.post('/quiz/submit', payload);
+      console.log('[DEBUG Handoff 2 Frontend Submit Quiz Response]', res.data);
+      setQuizResults(res.data);
+      setQuizViewMode('results');
+      if (res.data.newBadges && Array.isArray(res.data.newBadges) && res.data.newBadges.length > 0) {
+        setUnlockedBadgesModal(res.data.newBadges);
+        triggerConfettiEffect();
+      } else if (res.data.score >= 70) {
+        triggerConfettiEffect();
+      }
+      fetchQuizHistory();
+      toast.success(`Quiz completed! Score: ${res.data.score}%`);
+    } catch (err: any) {
+      console.error('[DEBUG Frontend Submit Quiz Error]', err.response?.data || err.message);
+      toast.error('Failed to submit quiz');
+    } finally {
+      setSubmittingQuiz(false);
+    }
+  };
+
+  const handleGenerateExam = async () => {
+    if (!subjectId) return;
+    setExamLoading(true);
+    setExamError('');
+    try {
+      const payload: any = { subjectId, difficulty: examDifficulty, examMode: true };
+      if (selectedExamTopic) payload.topic = selectedExamTopic;
+      const res = await API.post('/quiz/generate', payload);
+      const questions: QuizQuestion[] = res.data.questions || [];
+      setExamQuestions(questions);
+      setExamUserAnswers(new Array(questions.length).fill(''));
+      setQuizQuestions(questions);
+      setUserAnswers(new Array(questions.length).fill(''));
+      setExamViewMode('taking');
+      setQuizViewMode('taking');
+      setExamTimeRemaining(questions.length * 60);
+
+      if (examTimerIntervalRef.current) clearInterval(examTimerIntervalRef.current);
+      examTimerIntervalRef.current = setInterval(() => {
+        setExamTimeRemaining((prev) => {
+          if (prev <= 1) {
+            clearInterval(examTimerIntervalRef.current);
+            handleSubmitExamAuto();
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+      toast.success('Exam session started!');
+    } catch (err: any) {
+      setExamError(err.response?.data?.message || 'Failed to start exam');
+      toast.error('Failed to start exam');
+    } finally {
+      setExamLoading(false);
+    }
+  };
+
+  const handleSubmitExamAuto = async () => {
+    if (examTimerIntervalRef.current) clearInterval(examTimerIntervalRef.current);
+    toast.error('Exam time expired! Submitting answers automatically...');
+    handleSubmitExam();
+  };
+
+  const handleSubmitExam = async () => {
+    if (examTimerIntervalRef.current) clearInterval(examTimerIntervalRef.current);
+    if (!subjectId) return;
+    setSubmittingExam(true);
+    const payload = {
+      subjectId,
+      difficulty: examDifficulty,
+      topic: selectedExamTopic || undefined,
+      questions: examQuestions.length > 0 ? examQuestions : quizQuestions,
+      userAnswers: examUserAnswers.some((a) => a !== '') ? examUserAnswers : userAnswers,
+      examMode: true,
+    };
+    console.log('[DEBUG Handoff 2 Frontend Submit Exam Payload]', payload);
+    try {
+      const res = await API.post('/quiz/submit', payload);
+      console.log('[DEBUG Handoff 2 Frontend Submit Exam Response]', res.data);
+      setExamResults(res.data);
+      setExamViewMode('results');
+      if (res.data.newBadges && Array.isArray(res.data.newBadges) && res.data.newBadges.length > 0) {
+        setUnlockedBadgesModal(res.data.newBadges);
+        triggerConfettiEffect();
+      } else if (res.data.score >= 70) {
+        triggerConfettiEffect();
+      }
+      fetchQuizHistory();
+      toast.success(`Exam completed! Score: ${res.data.score}%`);
+    } catch (err: any) {
+      console.error('[DEBUG Frontend Submit Exam Error]', err.response?.data || err.message);
+      toast.error('Failed to submit exam');
+    } finally {
+      setSubmittingExam(false);
+    }
+  };
+
   const formatElapsedTime = (totalSecs: number) => {
     const hours = Math.floor(totalSecs / 3600);
     const mins = Math.floor((totalSecs % 3600) / 60);
     const secs = totalSecs % 60;
-
     const pad = (num: number) => num.toString().padStart(2, '0');
-
-    if (hours > 0) {
-      return `${pad(hours)}:${pad(mins)}:${pad(secs)}`;
-    }
-    return `${pad(mins)}:${pad(secs)}`;
+    return hours > 0 ? `${pad(hours)}:${pad(mins)}:${pad(secs)}` : `${pad(mins)}:${pad(secs)}`;
   };
 
-  const getTodayISO = () => {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const day = String(now.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
+  const getKnowledgeMapTopicOptions = () => {
+    const map = subject?.knowledgeMap || initialSubject?.knowledgeMap;
+    if (!map || !map.topics || !Array.isArray(map.topics)) return [];
+    const list: string[] = [];
+    map.topics.forEach((t) => {
+      if (t.name && !list.includes(t.name)) list.push(t.name);
+      if (t.subtopics && Array.isArray(t.subtopics)) {
+        t.subtopics.forEach((st) => {
+          if (st && !list.includes(st)) list.push(st);
+        });
+      }
+    });
+    return list;
   };
-
-  const formatDateNice = (dateStr: string) => {
-    try {
-      const [year, month, day] = dateStr.split('-').map(Number);
-      const d = new Date(year, month - 1, day);
-      return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-    } catch {
-      return dateStr;
-    }
-  };
-
-  const getDaysUntilExam = (itemDateStr: string, examDateStr: string) => {
-    try {
-      const [iY, iM, iD] = itemDateStr.split('-').map(Number);
-      const itemDate = new Date(iY, iM - 1, iD);
-
-      const examDate = new Date(examDateStr);
-      examDate.setHours(0, 0, 0, 0);
-
-      const diffTime = examDate.getTime() - itemDate.getTime();
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-      if (diffDays === 0) return 'Exam Day!';
-      if (diffDays === 1) return '1 day before exam';
-      return `${diffDays} days before exam`;
-    } catch {
-      return '';
-    }
-  };
-
-  const allAnswered = userAnswers.length > 0 && userAnswers.every((ans) => ans.trim() !== '');
 
   const backLink = subject?.semesterId ? `/semesters/${subject.semesterId}` : '/dashboard';
-
   const hasKnowledgeMap = !!(knowledgeMapData?.topics && knowledgeMapData.topics.length > 0);
-  const todayISO = getTodayISO();
 
   return (
-    <div className="min-h-screen font-inter flex flex-col relative overflow-x-hidden" style={{ backgroundColor: '#060E10', color: '#DAF1DE' }}>
-      {/* Ambient Background Glows */}
-      <div className="fixed inset-0 pointer-events-none overflow-hidden" style={{ zIndex: 0 }}>
-        <div style={{ position: 'absolute', top: '-15%', left: '-10%', width: 700, height: 700, borderRadius: '50%', background: 'radial-gradient(circle, rgba(168,212,220,0.07) 0%, transparent 65%)', filter: 'blur(80px)' }} />
-        <div style={{ position: 'absolute', top: '25%', right: '-10%', width: 700, height: 700, borderRadius: '50%', background: 'radial-gradient(circle, rgba(149,155,185,0.07) 0%, transparent 65%)', filter: 'blur(80px)' }} />
-        <div style={{ position: 'absolute', bottom: '5%', left: '30%', width: 600, height: 600, borderRadius: '50%', background: 'radial-gradient(circle, rgba(78,201,212,0.05) 0%, transparent 65%)', filter: 'blur(70px)' }} />
-      </div>
+    <div className="min-h-screen font-sans flex bg-[#F0F4F7] text-[#1E3A4A]">
+      {/* ── Persistent Sidebar Navigation ── */}
+      <Sidebar />
 
-      {/* Navbar */}
-      <nav style={{ background: 'linear-gradient(90deg, #0A1F20 0%, #0D2420 50%, #0A1A2A 100%)', borderBottom: '1px solid rgba(168,212,220,0.1)', position: 'relative', zIndex: 10 }} className="px-10 py-4 flex items-center justify-between gap-6">
-        <div className="flex items-center gap-4">
-          <Link to={backLink} className="flex items-center gap-2 text-sm text-[#8EB69B] hover:text-[#A8D4DC] transition-colors font-medium">
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
-            Back to Semester
-          </Link>
-          <div style={{ width: '1px', height: '24px', background: 'rgba(168,212,220,0.15)', margin: '0 8px' }} />
-          <img src={logo} alt="LearnOS" className="h-9 w-auto" />
-          <span className="font-jakarta font-bold text-xl tracking-wide" style={{ background: 'linear-gradient(90deg, #A8D4DC, #4EC9D4)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>LearnOS</span>
-        </div>
-        <button
-          onClick={logoutUser}
-          style={{ background: 'linear-gradient(135deg, #0d2820 0%, #0a1a2a 100%)', border: '1px solid rgba(168,212,220,0.2)', color: '#DAF1DE' }}
-          className="flex items-center gap-2 px-5 py-2.5 text-sm font-medium rounded-xl hover:border-teal-400 transition-colors"
-        >
-          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
-          Logout
-        </button>
-      </nav>
+      {/* ── Main Content Area ── */}
+      <main className="flex-1 ml-0 md:ml-64 pt-14 md:pt-0 min-h-screen flex flex-col overflow-y-auto bg-[#F0F4F7]">
+        <div className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 flex flex-col gap-4 sm:gap-6">
 
-      {/* Main Content Area */}
-      <div className="flex flex-col p-8 md:p-10 gap-8 max-w-screen-2xl w-full mx-auto relative flex-1" style={{ zIndex: 1 }}>
-        {/* Page Header */}
-        <div className="flex flex-col gap-2">
-          {loadingSubject ? (
-            <div className="h-10 w-64 bg-slate-800/50 animate-pulse rounded-xl" />
-          ) : (
-            <h1 className="font-jakarta font-bold text-3xl md:text-4xl" style={{ background: 'linear-gradient(90deg, #DAF1DE 0%, #A8D4DC 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
-              {subject?.name || 'Study Subject'}
-            </h1>
-          )}
-          <p className="text-sm text-[#8EB69B]">Upload course materials, chat with AI, track study time, visualize knowledge maps, and test your knowledge</p>
-        </div>
+          {/* Top Navigation & Page Title */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between pb-4 border-b border-[#E5E7EB] gap-4">
+            <div>
+              <div className="flex items-center gap-3 mb-2">
+                <Link
+                  to="/dashboard"
+                  className="inline-flex items-center gap-1.5 text-xs text-[#6B7B85] hover:text-[#2E7C87] font-medium no-underline transition-colors"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                  <span>Back to Dashboard</span>
+                </Link>
+                <span className="text-xs text-[#6B7B85]">•</span>
+                <Link
+                  to={backLink}
+                  className="inline-flex items-center gap-1 text-xs text-[#2E7C87] font-semibold hover:underline no-underline"
+                >
+                  <span>Semester Subjects</span>
+                </Link>
+              </div>
+              <h1 className="font-sans font-semibold text-[#1E3A4A] text-lg md:text-xl tracking-tight">
+                {loadingSubject ? 'Loading Subject...' : subject?.name || 'Subject Workspace'}
+              </h1>
+              <p className="text-sm text-[#6B7B85] mt-0.5 font-normal">
+                Upload materials, ask AI questions, track study time, build knowledge maps, and take quizzes.
+              </p>
+            </div>
+          </div>
 
-        {/* SECTION 1: STUDY TIMER CARD */}
-        <div
-          style={{
-            background: 'linear-gradient(145deg, #0c1e1f 0%, #0a1720 100%)',
-            border: '1px solid rgba(168,212,220,0.12)',
-          }}
-          className="rounded-3xl p-6 md:p-7 flex flex-col gap-4 w-full"
-        >
-          <div className="flex flex-col md:flex-row items-center justify-between gap-6 w-full">
+          {/* ── SECTION 1: STUDY SESSION TIMER ── */}
+          <div className="bg-white rounded-2xl p-6 border border-[#E5E7EB] flex flex-col md:flex-row items-center justify-between gap-6">
             <div className="flex items-center gap-4">
-              <div style={{ width: 44, height: 44, background: 'linear-gradient(135deg, #0d3d3a 0%, #1a5c5a 100%)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#A8D4DC' }}>
-                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+              <div className="w-10 h-10 rounded-xl bg-[#2E7C87]/10 text-[#2E7C87] flex items-center justify-center shrink-0">
+                <Clock className="w-5 h-5" />
               </div>
               <div>
-                <h2 className="font-jakarta font-bold text-lg" style={{ color: '#DAF1DE' }}>Study Session Timer</h2>
-                <p className="text-xs text-[#8EB69B]">Track and log your active study time for this subject</p>
+                <h2 className="font-sans font-semibold text-base text-[#1E3A4A]">Study Session Timer</h2>
+                <p className="text-xs text-[#6B7B85]">Track and log active study duration for this subject</p>
               </div>
             </div>
 
-            <div className="flex items-center gap-6 flex-wrap justify-center md:justify-end">
-              {/* Large Monospace Timer Display with Glow Effect */}
-              <div className="px-6 py-2 rounded-2xl bg-[#060E10]/80 border border-teal-500/20 shadow-[0_0_20px_rgba(168,212,220,0.15)] flex items-center justify-center min-w-[140px]">
-                <span
-                  className="font-mono font-bold text-3xl md:text-4xl tracking-wider"
-                  style={{
-                    background: 'linear-gradient(135deg, #DAF1DE 0%, #4EC9D4 100%)',
-                    WebkitBackgroundClip: 'text',
-                    WebkitTextFillColor: 'transparent',
-                    filter: 'drop-shadow(0 0 10px rgba(168,212,220,0.4))',
-                  }}
-                >
+            <div className="flex items-center gap-4 flex-wrap justify-center md:justify-end">
+              {/* Monospace Tabular Numerals Timer Display */}
+              <div className="px-5 py-2 rounded-xl bg-[#F0F4F7] border border-[#E5E7EB] flex items-center justify-center min-w-[130px]">
+                <span className="font-mono text-2xl md:text-3xl font-semibold text-[#1E3A4A] [font-variant-numeric:tabular-nums]">
                   {formatElapsedTime(elapsedSeconds)}
                 </span>
               </div>
 
-              {/* Actions */}
+              {/* Start / Pause Button */}
+              <button
+                type="button"
+                onClick={handleToggleTimer}
+                className={`px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer ${
+                  isTimerRunning
+                    ? 'bg-amber-100 text-amber-800 border border-amber-200 hover:bg-amber-200'
+                    : 'bg-[#2E7C87] text-white hover:bg-[#256770]'
+                }`}
+              >
+                {isTimerRunning ? (
+                  <>
+                    <Pause className="w-3.5 h-3.5" />
+                    <span>Pause</span>
+                  </>
+                ) : (
+                  <>
+                    <Play className="w-3.5 h-3.5" />
+                    <span>Start Session</span>
+                  </>
+                )}
+              </button>
+
+              {/* Save & Finish Button */}
+              <button
+                type="button"
+                onClick={handleSaveTimer}
+                disabled={savingTimer || elapsedSeconds === 0}
+                className="px-4 py-2 rounded-lg text-xs font-semibold text-white bg-[#1E3A4A] hover:bg-[#152B37] disabled:opacity-40 transition-colors flex items-center gap-1.5 cursor-pointer"
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>Save Log</span>
+              </button>
+            </div>
+          </div>
+
+          {/* ── SECTION 2: AI KNOWLEDGE MAP ── */}
+          <div className="bg-white rounded-2xl p-6 border border-[#E5E7EB] flex flex-col gap-6">
+            <div className="flex items-center justify-between flex-wrap gap-4 pb-4 border-b border-[#E5E7EB]">
               <div className="flex items-center gap-3">
-                {/* Start / Pause Button */}
+                <div className="w-10 h-10 rounded-xl bg-[#2E7C87]/10 text-[#2E7C87] flex items-center justify-center shrink-0">
+                  <Brain className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="font-sans font-semibold text-base text-[#1E3A4A]">AI Knowledge Map</h2>
+                  <p className="text-xs text-[#6B7B85]">Structured topic hierarchy derived from uploaded course materials</p>
+                </div>
+              </div>
+
+              {hasKnowledgeMap && (
                 <button
                   type="button"
-                  onClick={handleToggleTimer}
-                  className={`px-5 py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center gap-2 cursor-pointer hover:shadow-lg ${
-                    isTimerRunning
-                      ? 'bg-amber-500/10 border border-amber-500/30 text-amber-300 hover:bg-amber-500/20'
-                      : 'bg-[#4EC9D4]/10 border border-[#4EC9D4]/30 text-[#4EC9D4] hover:bg-[#4EC9D4]/20'
-                  }`}
+                  onClick={handleGenerateKnowledgeMap}
+                  disabled={generatingMap}
+                  className="px-3.5 py-1.5 rounded-lg text-xs font-medium text-[#2E7C87] border border-[#2E7C87]/30 hover:bg-[#2E7C87]/10 disabled:opacity-50 transition-colors flex items-center gap-1.5 cursor-pointer"
                 >
-                  {isTimerRunning ? (
-                    <>
-                      <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24"><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/></svg>
-                      <span>Pause</span>
-                    </>
-                  ) : (
-                    <>
-                      <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                      <span>Start</span>
-                    </>
-                  )}
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Regenerate Map</span>
                 </button>
+              )}
+            </div>
 
-                {/* Save & Finish Button */}
+            {!hasKnowledgeMap ? (
+              <div className="flex flex-col items-center justify-center p-8 rounded-xl border border-dashed border-[#E5E7EB] text-center gap-3">
+                <Brain className="w-8 h-8 text-[#2E7C87]" />
+                <h3 className="font-sans font-semibold text-sm text-[#1E3A4A]">No Knowledge Map Generated Yet</h3>
+                <p className="text-xs text-[#6B7B85] max-w-md">
+                  Upload your study materials in the materials section below and click to build a topic roadmap.
+                </p>
                 <button
                   type="button"
-                  onClick={handleSaveTimer}
-                  disabled={savingTimer || elapsedSeconds === 0}
-                  className="px-5 py-2.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 cursor-pointer hover:shadow-lg"
-                  style={{ background: 'linear-gradient(135deg, #A8D4DC 0%, #4EC9D4 100%)', color: '#040D0E', boxShadow: '0 0 15px rgba(168,212,220,0.2)' }}
+                  onClick={handleGenerateKnowledgeMap}
+                  disabled={generatingMap}
+                  className="mt-2 px-4 py-2 rounded-lg text-xs font-semibold text-white bg-[#2E7C87] hover:bg-[#256770] disabled:opacity-50 transition-colors flex items-center gap-1.5 cursor-pointer"
                 >
-                  {savingTimer ? (
-                    <>
-                      <svg className="animate-spin h-4 w-4 text-[#040D0E]" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/></svg>
-                      <span>Saving...</span>
-                    </>
-                  ) : (
-                    <>
-                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/></svg>
-                      <span>Save & Finish</span>
-                    </>
-                  )}
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>{generatingMap ? 'Analyzing Materials...' : 'Generate Knowledge Map'}</span>
                 </button>
               </div>
-            </div>
-          </div>
-
-          {/* Timer Message Notification */}
-          {timerMessage && (
-            <div
-              className={`w-full text-xs font-medium px-4 py-2.5 rounded-xl border flex items-center gap-2 ${
-                timerMessage.type === 'error'
-                  ? 'bg-red-500/10 border-red-500/20 text-red-400'
-                  : timerMessage.type === 'success'
-                  ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
-                  : 'bg-teal-500/10 border-teal-500/20 text-[#4EC9D4]'
-              }`}
-            >
-              <span>{timerMessage.text}</span>
-            </div>
-          )}
-        </div>
-
-        {/* SECTION 2: KNOWLEDGE MAP CARD */}
-        <div
-          style={{
-            background: 'linear-gradient(145deg, #0c1e1f 0%, #0a1720 100%)',
-            border: '1px solid rgba(168,212,220,0.12)',
-          }}
-          className="rounded-3xl p-6 md:p-8 flex flex-col gap-6 w-full"
-        >
-          {/* Header */}
-          <div className="flex items-center justify-between flex-wrap gap-4 pb-4 border-b border-white/5">
-            <div className="flex items-center gap-3">
-              <div style={{ width: 40, height: 40, background: 'linear-gradient(135deg, #2a1a4a 0%, #0d3d3a 100%)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#B8A0E8' }}>
-                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/></svg>
-              </div>
-              <div>
-                <h2 className="font-jakarta font-bold text-xl" style={{ color: '#DAF1DE' }}>AI Knowledge Map</h2>
-                <p className="text-xs text-[#8EB69B]">Recommended learning path & topic hierarchy derived from your materials</p>
-              </div>
-            </div>
-
-            {/* Regenerate Button if map exists */}
-            {hasKnowledgeMap && (
-              <button
-                onClick={handleGenerateKnowledgeMap}
-                disabled={generatingMap}
-                className="px-4 py-2 rounded-xl text-xs font-semibold transition-all disabled:opacity-50 flex items-center gap-2 cursor-pointer hover:border-teal-400"
-                style={{ background: 'linear-gradient(135deg, #0d2820 0%, #0a1a2a 100%)', border: '1px solid rgba(168,212,220,0.2)', color: '#DAF1DE' }}
-              >
-                {generatingMap ? (
-                  <>
-                    <svg className="animate-spin h-3.5 w-3.5 text-[#4EC9D4]" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/></svg>
-                    <span>Analyzing...</span>
-                  </>
-                ) : (
-                  <>
-                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-                    <span>Regenerate Map</span>
-                  </>
-                )}
-              </button>
-            )}
-          </div>
-
-          {/* Body State: No map generated yet */}
-          {!hasKnowledgeMap && (
-            <div className="flex flex-col items-center justify-center p-8 rounded-2xl text-center gap-4 border border-dashed border-teal-500/20" style={{ backgroundColor: 'rgba(6, 14, 16, 0.6)' }}>
-              <div className="w-12 h-12 rounded-2xl bg-teal-500/10 flex items-center justify-center text-[#4EC9D4]">
-                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/></svg>
-              </div>
-              <div className="max-w-md flex flex-col gap-1">
-                <h3 className="font-jakarta font-semibold text-base text-[#DAF1DE]">No Knowledge Map Generated Yet</h3>
-                <p className="text-xs text-[#8EB69B]">Upload your course documents and click below to build a structured, step-by-step topic roadmap.</p>
-              </div>
-              <button
-                onClick={handleGenerateKnowledgeMap}
-                disabled={generatingMap}
-                className="mt-2 px-6 py-3 rounded-xl text-sm font-semibold transition-all disabled:opacity-50 flex items-center gap-2 cursor-pointer hover:shadow-lg"
-                style={{ background: 'linear-gradient(135deg, #A8D4DC 0%, #4EC9D4 100%)', color: '#040D0E', boxShadow: '0 0 15px rgba(168,212,220,0.2)' }}
-              >
-                {generatingMap ? (
-                  <>
-                    <svg className="animate-spin h-4 w-4 text-[#040D0E]" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/></svg>
-                    <span>Analyzing your materials...</span>
-                  </>
-                ) : (
-                  <>
-                    <span>Generate Knowledge Map</span>
-                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-                  </>
-                )}
-              </button>
-
-              {mapError && (
-                <p className="text-xs text-red-400 mt-2 px-4 py-2 rounded-xl bg-red-500/10 border border-red-500/20">{mapError}</p>
-              )}
-            </div>
-          )}
-
-          {/* Body State: Knowledge Map Tree Visualization */}
-          {hasKnowledgeMap && (
-            <div className="flex flex-col gap-6 relative pl-2 md:pl-4">
-              {mapError && (
-                <p className="text-xs text-red-400 mb-2 px-4 py-2 rounded-xl bg-red-500/10 border border-red-500/20">{mapError}</p>
-              )}
-
-              <div className="flex flex-col gap-6 relative">
-                {/* Continuous Vertical Flow Line connecting topic badges */}
-                <div
-                  className="absolute left-[19px] top-6 bottom-6 w-0.5 pointer-events-none"
-                  style={{ background: 'linear-gradient(180deg, rgba(78,201,212,0.4) 0%, rgba(149,155,185,0.2) 100%)' }}
-                />
-
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {[...knowledgeMapData!.topics]
                   .sort((a, b) => (a.order || 0) - (b.order || 0))
                   .map((topic, idx) => (
-                    <div key={idx} className="flex items-start gap-5 relative z-10">
-                      {/* Order Number Badge */}
-                      <div
-                        className="w-10 h-10 rounded-full flex items-center justify-center font-jakarta font-bold text-sm shrink-0"
-                        style={{
-                          background: 'linear-gradient(135deg, #0d3d3a 0%, #0c1e1f 100%)',
-                          border: '1px solid rgba(78,201,212,0.4)',
-                          color: '#4EC9D4',
-                          boxShadow: '0 0 15px rgba(78,201,212,0.25)',
-                        }}
-                      >
-                        {topic.order ?? idx + 1}
+                    <div key={idx} className="bg-[#F0F4F7] rounded-xl p-4 border border-[#E5E7EB] flex flex-col gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="w-5 h-5 rounded-full bg-[#2E7C87] text-white text-[10px] font-semibold flex items-center justify-center shrink-0">
+                          {topic.order ?? idx + 1}
+                        </span>
+                        <h4 className="font-sans font-semibold text-xs text-[#1E3A4A] truncate">{topic.name}</h4>
                       </div>
-
-                      {/* Topic Content Card */}
-                      <div
-                        className="flex-1 p-5 rounded-2xl flex flex-col gap-3 transition-all hover:border-teal-500/30"
-                        style={{
-                          backgroundColor: 'rgba(6, 14, 16, 0.65)',
-                          border: '1px solid rgba(168,212,220,0.1)',
-                        }}
-                      >
-                        <h3 className="font-jakarta font-semibold text-base text-[#DAF1DE]">
-                          {topic.name}
-                        </h3>
-
-                        {/* Subtopic Pills */}
-                        {topic.subtopics && topic.subtopics.length > 0 && (
-                          <div className="flex flex-wrap gap-2 mt-1">
-                            {topic.subtopics.map((sub, sIdx) => (
-                              <span
-                                key={sIdx}
-                                className="text-xs px-3 py-1.5 rounded-lg font-medium transition-colors"
-                                style={{
-                                  backgroundColor: '#0A1A1B',
-                                  border: '1px solid rgba(168,212,220,0.12)',
-                                  color: '#A8D4DC',
-                                }}
-                              >
-                                {sub}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
+                      {topic.subtopics && topic.subtopics.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 mt-1">
+                          {topic.subtopics.map((sub, sIdx) => (
+                            <span key={sIdx} className="text-[11px] px-2 py-0.5 rounded bg-white border border-[#E5E7EB] text-[#6B7B85] font-normal">
+                              {sub}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   ))}
               </div>
-            </div>
-          )}
-        </div>
-
-        {/* SECTION 3: AI STUDY PLANNER CARD */}
-        <div
-          style={{
-            background: 'linear-gradient(145deg, #0c1e1f 0%, #0a1720 100%)',
-            border: '1px solid rgba(168,212,220,0.12)',
-          }}
-          className="rounded-3xl p-6 md:p-8 flex flex-col gap-6 w-full"
-        >
-          {/* Header */}
-          <div className="flex items-center justify-between flex-wrap gap-4 pb-4 border-b border-white/5">
-            <div className="flex items-center gap-3">
-              <div style={{ width: 40, height: 40, background: 'linear-gradient(135deg, #1e3a5f 0%, #0d3d3a 100%)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#60A5FA' }}>
-                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-              </div>
-              <div>
-                <h2 className="font-jakarta font-bold text-xl" style={{ color: '#DAF1DE' }}>AI Study Planner</h2>
-                <p className="text-xs text-[#8EB69B]">Personalized day-by-day exam preparation schedule</p>
-              </div>
-            </div>
-
-            {/* Create New Plan Button if plan already exists */}
-            {studyPlan && !showPlanSetup && (
-              <button
-                onClick={handleCreateNewPlan}
-                className="px-4 py-2 rounded-xl text-xs font-semibold transition-all flex items-center gap-2 cursor-pointer hover:border-teal-400"
-                style={{ background: 'linear-gradient(135deg, #0d2820 0%, #0a1a2a 100%)', border: '1px solid rgba(168,212,220,0.2)', color: '#DAF1DE' }}
-              >
-                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4"/></svg>
-                <span>Create New Plan</span>
-              </button>
             )}
           </div>
 
-          {/* Condition A: No Knowledge Map generated yet */}
-          {!hasKnowledgeMap && (
-            <div className="flex flex-col items-center justify-center p-8 rounded-2xl text-center gap-3 border border-dashed border-teal-500/20" style={{ backgroundColor: 'rgba(6, 14, 16, 0.6)' }}>
-              <div className="w-10 h-10 rounded-2xl bg-amber-500/10 flex items-center justify-center text-amber-400">
-                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+          {/* ── SECTION 3: AI STUDY PLANNER ── */}
+          <div className="bg-white rounded-2xl p-6 border border-[#E5E7EB] flex flex-col gap-6">
+            <div className="flex items-center justify-between flex-wrap gap-4 pb-4 border-b border-[#E5E7EB]">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-[#2E7C87]/10 text-[#2E7C87] flex items-center justify-center shrink-0">
+                  <Calendar className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="font-sans font-semibold text-base text-[#1E3A4A]">AI Study Planner</h2>
+                  <p className="text-xs text-[#6B7B85]">Day-by-day exam preparation milestone schedule</p>
+                </div>
               </div>
-              <p className="text-sm font-semibold text-[#DAF1DE]">Generate a Knowledge Map first before creating a study plan</p>
-              <p className="text-xs text-[#8EB69B] max-w-md">
-                Please scroll up to the Knowledge Map section above and click <strong>"Generate Knowledge Map"</strong> so the AI can sequence your topics.
-              </p>
-            </div>
-          )}
 
-          {/* Condition B: Knowledge Map exists, but no Study Plan or user clicked Create New Plan */}
-          {hasKnowledgeMap && (!studyPlan || showPlanSetup) && (
-            <form onSubmit={handleGeneratePlan} className="flex flex-col gap-6 my-2">
-              <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 p-6 rounded-2xl" style={{ backgroundColor: 'rgba(6, 14, 16, 0.6)', border: '1px solid rgba(168,212,220,0.08)' }}>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 flex-1">
-                  {/* Exam Date Picker */}
-                  <div className="flex flex-col gap-2">
-                    <label htmlFor="exam-date-picker" className="text-xs font-medium text-[#8EB69B]">Exam Date</label>
+              <div className="flex items-center gap-2">
+                {studyPlan && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleExportPlanPDF}
+                      className="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-[#2E7C87] border border-[#E5E7EB] bg-white hover:bg-[#F0F4F7] transition-colors flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Export PDF</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowPlanSetup(!showPlanSetup)}
+                      className="px-3.5 py-1.5 rounded-lg text-xs font-medium text-[#2E7C87] border border-[#2E7C87]/30 hover:bg-[#2E7C87]/10 transition-colors flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>{showPlanSetup ? 'Cancel' : 'Regenerate Plan'}</span>
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Setup Form (when no plan exists or user clicked Regenerate) */}
+            {(!studyPlan || showPlanSetup) && (
+              <form onSubmit={handleGeneratePlan} className="bg-[#F0F4F7] rounded-xl p-5 border border-[#E5E7EB] flex flex-col gap-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-sans font-semibold text-sm text-[#1E3A4A]">Configure Exam Parameters</h3>
+                  {planError && <p className="text-xs text-red-600 font-medium">{planError}</p>}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wide text-[#6B7B85] mb-1">
+                      Target Exam Date
+                    </label>
                     <input
-                      id="exam-date-picker"
                       type="date"
                       required
-                      min={todayISO}
                       value={examDateInput}
                       onChange={(e) => setExamDateInput(e.target.value)}
-                      disabled={generatingPlan}
-                      style={{ backgroundColor: '#0A1A1B', border: '1px solid rgba(168,212,220,0.18)', color: '#DAF1DE' }}
-                      className="px-4 py-3 rounded-xl text-sm focus:outline-none focus:border-teal-400 cursor-pointer"
+                      className="w-full px-3 py-2 rounded-lg border border-[#E5E7EB] text-xs font-medium text-[#1E3A4A] bg-white focus:outline-none focus:border-[#2E7C87]"
                     />
                   </div>
 
-                  {/* Hours Per Day Input */}
-                  <div className="flex flex-col gap-2">
-                    <label htmlFor="hours-per-day-input" className="text-xs font-medium text-[#8EB69B]">Available Study Hours / Day</label>
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wide text-[#6B7B85] mb-1">
+                      Daily Study Goal (Hours)
+                    </label>
                     <input
-                      id="hours-per-day-input"
                       type="number"
+                      min="0.5"
+                      max="12"
+                      step="0.5"
                       required
-                      min={0.5}
-                      max={14}
-                      step={0.5}
                       value={hoursPerDayInput}
                       onChange={(e) => setHoursPerDayInput(Number(e.target.value))}
-                      disabled={generatingPlan}
-                      style={{ backgroundColor: '#0A1A1B', border: '1px solid rgba(168,212,220,0.18)', color: '#DAF1DE' }}
-                      className="px-4 py-3 rounded-xl text-sm focus:outline-none focus:border-teal-400 cursor-pointer"
+                      className="w-full px-3 py-2 rounded-lg border border-[#E5E7EB] text-xs font-medium text-[#1E3A4A] bg-white focus:outline-none focus:border-[#2E7C87]"
                     />
                   </div>
                 </div>
 
-                {/* Generate Action Button */}
-                <div className="flex items-center gap-3 shrink-0">
-                  {showPlanSetup && studyPlan && (
+                <div className="flex justify-end gap-2 pt-2">
+                  {studyPlan && (
                     <button
                       type="button"
                       onClick={() => setShowPlanSetup(false)}
-                      className="px-4 py-3 rounded-xl text-sm font-medium text-[#8EB69B] hover:text-[#DAF1DE] transition-colors"
+                      className="px-4 py-2 rounded-lg text-xs font-medium text-[#6B7B85] hover:bg-gray-200/60 transition-colors"
                     >
                       Cancel
                     </button>
                   )}
                   <button
                     type="submit"
-                    disabled={generatingPlan || !examDateInput}
-                    className="px-6 py-3 rounded-xl text-sm font-semibold transition-all disabled:opacity-50 flex items-center gap-2 cursor-pointer hover:shadow-lg"
-                    style={{ background: 'linear-gradient(135deg, #A8D4DC 0%, #4EC9D4 100%)', color: '#040D0E', boxShadow: '0 0 15px rgba(168,212,220,0.2)' }}
+                    disabled={generatingPlan || !examDateInput || !hasKnowledgeMap}
+                    className="px-4 py-2 rounded-lg text-xs font-semibold text-white bg-[#2E7C87] hover:bg-[#256770] disabled:opacity-50 transition-colors flex items-center gap-1.5 cursor-pointer"
                   >
-                    {generatingPlan ? (
-                      <>
-                        <svg className="animate-spin h-4 w-4 text-[#040D0E]" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/></svg>
-                        <span>Creating your personalized study plan...</span>
-                      </>
-                    ) : (
-                      <>
-                        <span>Generate Study Plan</span>
-                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-                      </>
-                    )}
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>{generatingPlan ? 'Building Schedule...' : 'Generate AI Schedule'}</span>
                   </button>
                 </div>
-              </div>
+                {!hasKnowledgeMap && (
+                  <p className="text-[11px] text-[#6B7B85] italic">
+                    Note: Generate a Knowledge Map above first so the AI can sequence your topics.
+                  </p>
+                )}
+              </form>
+            )}
 
-              {planError && (
-                <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
-                  {planError}
+            {/* Render Plan Day-by-Day Schedule if present */}
+            {studyPlan && studyPlan.schedule && studyPlan.schedule.length > 0 && (
+              <div className="flex flex-col gap-4">
+                <div className="flex items-center justify-between bg-[#F0F4F7] p-4 rounded-xl border border-[#E5E7EB]">
+                  <div className="flex items-center gap-3">
+                    <div className="flex flex-col">
+                      <span className="text-[11px] font-semibold uppercase tracking-wide text-[#6B7B85]">Exam Date</span>
+                      <span className="font-mono text-sm font-semibold text-[#1E3A4A] [font-variant-numeric:tabular-nums]">
+                        {new Date(studyPlan.examDate).toLocaleDateString('en-US', {
+                          weekday: 'short',
+                          month: 'short',
+                          day: 'numeric',
+                          year: 'numeric',
+                        })}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-1 text-xs">
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#2E7C87]" />
+                      <span className="font-semibold text-[#1E3A4A] font-mono [font-variant-numeric:tabular-nums]">
+                        {studyPlan.hoursPerDay} hrs/day
+                      </span>
+                    </div>
+                    {(() => {
+                      const daysLeft = getDaysUntilExam(studyPlan.examDate);
+                      return (
+                        <div className="px-3 py-1 rounded-lg bg-[#1E3A4A] text-white text-xs font-mono font-semibold [font-variant-numeric:tabular-nums]">
+                          {daysLeft > 0 ? `${daysLeft} Days Remaining` : daysLeft === 0 ? 'Exam Today!' : 'Past Exam'}
+                        </div>
+                      );
+                    })()}
+                  </div>
                 </div>
-              )}
-            </form>
-          )}
 
-          {/* Condition C: Study Plan exists and display mode active */}
-          {hasKnowledgeMap && studyPlan && !showPlanSetup && (
-            <div className="flex flex-col gap-6 my-2">
-              {/* Summary Sub-header */}
-              <div className="flex items-center justify-between flex-wrap gap-4 p-4 rounded-2xl bg-[#060E10]/60 border border-white/5">
-                <div className="flex items-center gap-6 flex-wrap text-xs text-[#8EB69B]">
-                  <div>
-                    <span className="text-[#DAF1DE] font-semibold block text-sm">
-                      {new Date(studyPlan.examDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                    </span>
-                    <span>Target Exam Date</span>
-                  </div>
-                  <div className="h-6 w-px bg-white/10" />
-                  <div>
-                    <span className="text-[#DAF1DE] font-semibold block text-sm">{studyPlan.hoursPerDay} hrs / day</span>
-                    <span>Daily Capacity</span>
-                  </div>
-                  <div className="h-6 w-px bg-white/10" />
-                  <div>
-                    <span className="text-[#4EC9D4] font-semibold block text-sm">{studyPlan.schedule?.length || 0} Days</span>
-                    <span>Schedule Duration</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Vertical Timeline List */}
-              <div className="flex flex-col gap-4 relative pl-2 md:pl-4">
-                <div
-                  className="absolute left-[19px] top-6 bottom-6 w-0.5 pointer-events-none"
-                  style={{ background: 'linear-gradient(180deg, rgba(78,201,212,0.4) 0%, rgba(96,165,250,0.2) 100%)' }}
-                />
-
-                {studyPlan.schedule.map((item, idx) => {
-                  const isToday = item.date === todayISO;
-                  const daysUntil = getDaysUntilExam(item.date, studyPlan.examDate);
-
-                  return (
-                    <div key={idx} className="flex items-start gap-5 relative z-10">
-                      {/* Timeline Day Dot / Icon */}
-                      <div
-                        className={`w-10 h-10 rounded-full flex items-center justify-center font-jakarta font-bold text-xs shrink-0 transition-all ${
-                          isToday
-                            ? 'bg-[#4EC9D4] text-[#040D0E] shadow-[0_0_15px_rgba(78,201,212,0.6)]'
-                            : 'bg-[#0A1A1B] border border-teal-500/30 text-[#A8D4DC]'
-                        }`}
-                      >
-                        {idx + 1}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {studyPlan.schedule.map((item, idx) => (
+                    <div
+                      key={idx}
+                      className="bg-[#F0F4F7] rounded-xl p-4 border border-[#E5E7EB] flex flex-col justify-between gap-3"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-[#2E7C87] uppercase tracking-wide">
+                          Day {idx + 1}
+                        </span>
+                        <span className="font-mono text-[11px] text-[#6B7B85] [font-variant-numeric:tabular-nums]">
+                          {new Date(item.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                        </span>
                       </div>
 
-                      {/* Schedule Item Card */}
-                      <div
-                        className={`flex-1 p-5 rounded-2xl flex flex-col gap-3 transition-all ${
-                          isToday
-                            ? 'bg-[#0A1F20] border-2 border-[#4EC9D4] shadow-[0_0_20px_rgba(78,201,212,0.2)]'
-                            : 'bg-[#060E10]/60 border border-white/10 hover:border-teal-500/30'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between flex-wrap gap-2">
-                          <div className="flex items-center gap-3">
-                            <h3 className="font-jakarta font-bold text-base text-[#DAF1DE]">
-                              {formatDateNice(item.date)}
-                            </h3>
-                            {isToday && (
-                              <span className="text-[10px] uppercase tracking-wider font-extrabold px-2.5 py-0.5 rounded-full bg-[#4EC9D4] text-[#040D0E]">
-                                Today
+                      <div className="flex flex-col gap-1">
+                        <span className="text-xs font-semibold text-[#1E3A4A]">Scheduled Topics</span>
+                        <div className="flex flex-wrap gap-1.5 mt-0.5">
+                          {item.topics && item.topics.length > 0 ? (
+                            item.topics.map((top, tIdx) => (
+                              <span
+                                key={tIdx}
+                                className="text-[11px] px-2 py-0.5 rounded bg-white border border-[#E5E7EB] text-[#1E3A4A] font-medium"
+                              >
+                                {top}
                               </span>
-                            )}
-                          </div>
-
-                          <div className="flex items-center gap-3">
-                            {daysUntil && (
-                              <span className="text-xs font-medium text-[#8EB69B] bg-white/5 px-3 py-1 rounded-lg border border-white/5">
-                                {daysUntil}
-                              </span>
-                            )}
-                            <span className="text-xs font-semibold text-[#4EC9D4] bg-teal-500/10 px-3 py-1 rounded-lg border border-teal-500/20">
-                              ⏱ {item.durationMinutes ? `${Math.round(item.durationMinutes / 60)}h ${item.durationMinutes % 60}m` : `${studyPlan.hoursPerDay}h`}
-                            </span>
-                          </div>
+                            ))
+                          ) : (
+                            <span className="text-[11px] text-[#6B7B85] italic">General Review</span>
+                          )}
                         </div>
+                      </div>
 
-                        {/* Topic list for this day */}
-                        {item.topics && item.topics.length > 0 && (
-                          <ul className="flex flex-col gap-2 mt-1 pl-1">
-                            {item.topics.map((t, tIdx) => (
-                              <li key={tIdx} className="flex items-center gap-2 text-sm text-[#A8D4DC]">
-                                <span className="w-1.5 h-1.5 rounded-full bg-[#4EC9D4] shrink-0" />
-                                <span>{t}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        )}
+                      <div className="pt-2 border-t border-[#E5E7EB] flex items-center justify-between text-[11px] text-[#6B7B85]">
+                        <span>Goal duration</span>
+                        <span className="font-mono font-semibold text-[#1E3A4A] [font-variant-numeric:tabular-nums]">
+                          {item.durationMinutes} mins
+                        </span>
                       </div>
                     </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* SECTION 4: Two Column Layout */}
-        <div className="flex flex-col lg:flex-row gap-8 w-full">
-          {/* LEFT COLUMN: 40% Width - Upload & Materials */}
-          <div className="w-full lg:w-[40%] flex flex-col gap-6">
-            <div
-              style={{
-                background: 'linear-gradient(145deg, #0c1e1f 0%, #0a1720 100%)',
-                border: '1px solid rgba(168,212,220,0.12)',
-              }}
-              className="rounded-3xl p-6 md:p-8 flex flex-col gap-6"
-            >
-              <div className="flex items-center gap-3">
-                <div style={{ width: 40, height: 40, background: 'linear-gradient(135deg, #0d3d3a 0%, #1a5c5a 100%)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#A8D4DC' }}>
-                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
-                </div>
-                <div>
-                  <h2 className="font-jakarta font-bold text-lg" style={{ color: '#DAF1DE' }}>Study Materials</h2>
-                  <p className="text-xs text-[#8EB69B]">Upload course files for AI context</p>
+                  ))}
                 </div>
               </div>
+            )}
+          </div>
 
-              {/* Upload Drop Zone */}
-              <div className="relative">
-                <input
-                  type="file"
-                  id={`upload-study-subject`}
-                  className="hidden"
-                  accept=".pdf,.docx,.txt"
-                  onChange={handleFileUpload}
-                  disabled={isUploading}
-                />
-                <label
-                  htmlFor={`upload-study-subject`}
-                  className="flex flex-col items-center justify-center gap-3 w-full py-8 px-4 rounded-2xl border border-dashed cursor-pointer transition-all hover:bg-teal-500/5 group text-center"
-                  style={{ borderColor: 'rgba(78,201,212,0.4)', background: 'rgba(10,26,27,0.5)', color: '#A8D4DC' }}
-                >
-                  {isUploading ? (
-                    <svg className="animate-spin h-8 w-8 text-[#4EC9D4]" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/></svg>
+          {/* ── TWO COLUMN GRID: LEFT = MATERIALS, RIGHT = CHAT & QUIZZES ── */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+            {/* LEFT COLUMN: Study Materials (4 cols) */}
+            <div className="lg:col-span-4 flex flex-col gap-6">
+              <div className="bg-white rounded-2xl p-6 border border-[#E5E7EB] flex flex-col gap-4">
+                <div className="flex items-center gap-3 pb-3 border-b border-[#E5E7EB]">
+                  <FileText className="w-5 h-5 text-[#2E7C87]" />
+                  <div>
+                    <h2 className="font-sans font-semibold text-base text-[#1E3A4A]">Course Materials</h2>
+                    <p className="text-xs text-[#6B7B85]">Files uploaded for AI indexing</p>
+                  </div>
+                </div>
+
+                {/* Upload Drop Zone */}
+                <div className="relative">
+                  <input
+                    type="file"
+                    id="upload-study-subject"
+                    className="hidden"
+                    accept=".pdf,.docx,.txt"
+                    onChange={handleFileUpload}
+                    disabled={isUploading}
+                  />
+                  <label
+                    htmlFor="upload-study-subject"
+                    className="flex flex-col items-center justify-center gap-2 p-6 rounded-xl border border-dashed border-[#E5E7EB] bg-[#F0F4F7] cursor-pointer hover:border-[#2E7C87] transition-colors text-center"
+                  >
+                    <UploadCloud className="w-6 h-6 text-[#2E7C87]" />
+                    <span className="text-xs font-semibold text-[#1E3A4A]">
+                      {isUploading ? 'Uploading...' : 'Click to Upload Material'}
+                    </span>
+                    <span className="text-[11px] text-[#6B7B85]">PDF, DOCX, TXT</span>
+                  </label>
+                </div>
+
+                {/* Materials List */}
+                <div className="flex flex-col gap-2 mt-2">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-[#6B7B85]">
+                    Uploaded Files ({materials.length})
+                  </span>
+                  {loadingMaterials ? (
+                    <div className="flex justify-center py-4">
+                      <div className="animate-spin h-5 w-5 border-2 border-[#2E7C87] border-t-transparent rounded-full" />
+                    </div>
+                  ) : materials.length === 0 ? (
+                    <div className="text-center py-6 text-xs text-[#6B7B85] border border-dashed border-[#E5E7EB] rounded-xl">
+                      No materials uploaded yet.
+                    </div>
                   ) : (
-                    <div className="p-3 rounded-full bg-teal-500/10 group-hover:bg-teal-500/20 transition-colors">
-                      <svg className="h-6 w-6 text-[#4EC9D4]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
-                    </div>
-                  )}
-                  <div>
-                    <span className="text-sm font-semibold block text-[#DAF1DE]">
-                      {isUploading ? 'Processing Material...' : 'Click to Upload Material'}
-                    </span>
-                    <span className="text-xs text-[#8EB69B] mt-1 block">Supports PDF, DOCX, TXT</span>
-                  </div>
-                </label>
-              </div>
-
-              {uploadStatus && (
-                <p className={`text-xs text-center font-medium px-3 py-2 rounded-xl border ${uploadStatus.type === 'error' ? 'bg-red-500/10 border-red-500/20 text-red-400' : 'bg-teal-500/10 border-teal-500/20 text-[#4EC9D4]'}`}>
-                  {uploadStatus.message}
-                </p>
-              )}
-
-              {/* Uploaded Materials List */}
-              <div className="flex flex-col gap-3">
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-[#8EB69B]">
-                  Uploaded Materials ({materials.length})
-                </h3>
-
-                {loadingMaterials ? (
-                  <div className="flex justify-center py-6">
-                    <svg className="animate-spin h-5 w-5 text-[#A8D4DC]" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/></svg>
-                  </div>
-                ) : materials.length === 0 ? (
-                  <div className="text-center py-8 text-xs rounded-xl border border-dashed border-[#1a3a38] text-[#346659]">
-                    No materials uploaded yet. Upload lecture notes, slides, or syllabus above.
-                  </div>
-                ) : (
-                  <div className="flex flex-col gap-2.5 max-h-[350px] overflow-y-auto pr-1" style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(168,212,220,0.2) transparent' }}>
-                    {materials.map((mat) => (
-                      <div key={mat._id} className="flex items-center gap-3 p-3.5 rounded-xl transition-colors group/mat" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(168,212,220,0.08)' }}>
-                        <div className="p-2 rounded-lg bg-teal-500/10 text-[#7EC8E3] shrink-0">
-                          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
+                    materials.map((mat) => (
+                      <div
+                        key={mat._id}
+                        className="flex items-center justify-between p-3 rounded-lg border border-[#E5E7EB] bg-[#F0F4F7]"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <FileText className="w-4 h-4 text-[#2E7C87] shrink-0" />
+                          <span className="text-xs font-medium text-[#1E3A4A] truncate">{mat.fileName}</span>
                         </div>
-                        <span className="text-sm truncate font-medium flex-1 text-[#DAF1DE]">{mat.fileName}</span>
                         <button
                           type="button"
                           onClick={() => handleDeleteMaterial(mat._id)}
-                          title="Delete material"
-                          className="p-1.5 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-400/10 transition-colors opacity-70 group-hover/mat:opacity-100 cursor-pointer shrink-0"
+                          className="p-1 text-[#6B7B85] hover:text-red-600 transition-colors cursor-pointer"
                         >
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                          </svg>
+                          <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
-                    ))}
-                  </div>
-                )}
+                    ))
+                  )}
+                </div>
               </div>
             </div>
-          </div>
 
-          {/* RIGHT COLUMN: 60% Width - Chat Interface */}
-          <div className="w-full lg:w-[60%] flex flex-col">
-            <div
-              style={{
-                background: 'linear-gradient(145deg, #0c1e1f 0%, #0a1720 100%)',
-                border: '1px solid rgba(168,212,220,0.12)',
-              }}
-              className="rounded-3xl p-6 md:p-8 flex flex-col flex-1"
-            >
-              {/* Header */}
-              <div className="flex items-center justify-between pb-4 mb-4 border-b border-white/5 flex-wrap gap-4">
-                <div className="flex items-center gap-3">
-                  <div style={{ width: 40, height: 40, background: isFeynmanMode ? 'linear-gradient(135deg, #713f12 0%, #a16207 100%)' : isConfusionMode ? 'linear-gradient(135deg, #4c1d95 0%, #6b21a8 100%)' : 'linear-gradient(135deg, #0d3d3a 0%, #1a5c5a 100%)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: isFeynmanMode ? '#fde047' : isConfusionMode ? '#c084fc' : '#A8D4DC', transition: 'all 0.3s ease' }}>
-                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/></svg>
+            {/* RIGHT COLUMN: AI Chat & Practice Quizzes (8 cols) */}
+            <div className="lg:col-span-8 flex flex-col gap-6">
+
+              {/* AI CHAT CONTAINER */}
+              <div className="bg-white rounded-2xl p-6 border border-[#E5E7EB] flex flex-col gap-4">
+                <div className="flex items-center justify-between pb-3 border-b border-[#E5E7EB] flex-wrap gap-3">
+                  <div className="flex items-center gap-2">
+                    <MessageSquare className="w-5 h-5 text-[#2E7C87]" />
+                    <h2 className="font-sans font-semibold text-base text-[#1E3A4A]">AI Study Assistant</h2>
                   </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h2 className="font-jakarta font-bold text-lg" style={{ color: '#DAF1DE' }}>
-                        {isFeynmanMode ? "Feynman Mode (Teach to Learn)" : isConfusionMode ? "AI Confusion Detector" : "AI Study Assistant"}
-                      </h2>
-                      {isFeynmanMode && (
-                        <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                          Teach Active
-                        </span>
-                      )}
-                      {isConfusionMode && (
-                        <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-md bg-purple-500/20 text-purple-300 border border-purple-500/30">
-                          Diagnostic Active
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-[#8EB69B]">
-                      {isFeynmanMode ? "Explain a concept in your own words to get AI evaluation against course materials" : isConfusionMode ? "Find missing prerequisites & clarify root causes of confusion" : "Ask questions powered by your uploaded course materials"}
-                    </p>
+
+                  <div className="flex items-center gap-2 flex-wrap text-xs">
+                    {/* Explain-at-Level Selector Dropdown */}
+                    <select
+                      value={explainLevel}
+                      onChange={(e) => setExplainLevel(e.target.value as ExplainLevel)}
+                      className="px-2.5 py-1 rounded-lg text-xs font-medium bg-[#F0F4F7] border border-[#E5E7EB] text-[#1E3A4A] focus:outline-none focus:border-[#2E7C87] cursor-pointer"
+                    >
+                      <option value="normal">Normal Mode</option>
+                      <option value="eli6">Explain Like I'm 6 (ELI6)</option>
+                      <option value="highschool">High School Teacher</option>
+                      <option value="university">University Level</option>
+                      <option value="exam">Model Exam Answer</option>
+                      <option value="interview">Technical Interview Answer</option>
+                    </select>
+
+                    <button
+                      type="button"
+                      onClick={toggleConfusionMode}
+                      className={`px-3 py-1 rounded-lg font-medium border transition-colors cursor-pointer ${
+                        isConfusionMode
+                          ? 'bg-purple-50 text-purple-700 border-purple-200 font-semibold'
+                          : 'bg-white text-[#6B7B85] border-[#E5E7EB] hover:text-[#1E3A4A]'
+                      }`}
+                    >
+                      Confusion Diagnostic
+                    </button>
+                    <button
+                      type="button"
+                      onClick={toggleFeynmanMode}
+                      className={`px-3 py-1 rounded-lg font-medium border transition-colors cursor-pointer ${
+                        isFeynmanMode
+                          ? 'bg-amber-50 text-amber-800 border-amber-200 font-semibold'
+                          : 'bg-white text-[#6B7B85] border-[#E5E7EB] hover:text-[#1E3A4A]'
+                      }`}
+                    >
+                      Teach Mode
+                    </button>
                   </div>
                 </div>
 
-                {/* Mode Toggle Buttons */}
-                <div className="flex items-center gap-2 flex-wrap">
-                  <button
-                    type="button"
-                    onClick={toggleConfusionMode}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
-                      isConfusionMode
-                        ? 'bg-purple-600/20 border border-purple-400 text-purple-300 shadow-[0_0_15px_rgba(168,85,247,0.3)]'
-                        : 'bg-teal-500/10 border border-teal-500/20 text-[#4EC9D4] hover:bg-teal-500/20'
-                    }`}
-                  >
-                    <span>{isConfusionMode ? '🔍' : '💡'}</span>
-                    <span>{isConfusionMode ? 'Exit Confusion' : "I'm Confused Mode"}</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={toggleFeynmanMode}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
-                      isFeynmanMode
-                        ? 'bg-amber-500/20 border border-amber-400 text-amber-300 shadow-[0_0_15px_rgba(234,179,8,0.3)]'
-                        : 'bg-amber-500/10 border border-amber-500/20 text-amber-300 hover:bg-amber-500/20'
-                    }`}
-                  >
-                    <span>🎓</span>
-                    <span>{isFeynmanMode ? 'Exit Teach Mode' : 'Teach Mode'}</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Chat Message Window (600px Height) */}
-              <div
-                className="h-[600px] overflow-y-auto flex flex-col gap-4 p-4 rounded-2xl mb-4"
-                style={{
-                  backgroundColor: 'rgba(6, 14, 16, 0.6)',
-                  border: '1px solid rgba(168,212,220,0.08)',
-                  scrollbarWidth: 'thin',
-                  scrollbarColor: 'rgba(168,212,220,0.2) transparent',
-                }}
-              >
-                {messages.length === 0 && !chatLoading && (
-                  <div className="flex flex-col items-center justify-center h-full text-center p-6 gap-3">
-                    <div className="w-12 h-12 rounded-2xl bg-teal-500/10 flex items-center justify-center text-[#4EC9D4]">
-                      <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
-                    </div>
-                    <p className="text-sm font-medium text-[#DAF1DE]">No questions asked yet</p>
-                    <p className="text-xs text-[#4a7a68] max-w-sm">
-                      Upload your course documents on the left, then ask questions, diagnose confusion, or use Teach Mode to explain concepts!
-                    </p>
-                  </div>
-                )}
-
-                {messages.map((msg, i) => {
-                  const isUserConfusion = msg.role === 'user' && msg.content.startsWith("I'm confused about:");
-                  const isUserFeynman = msg.role === 'user' && msg.content.startsWith("Teaching: ");
-                  const isPrevUserConfusion = i > 0 && messages[i - 1]?.role === 'user' && messages[i - 1]?.content.startsWith("I'm confused about:");
-                  const isPrevUserFeynman = i > 0 && messages[i - 1]?.role === 'user' && messages[i - 1]?.content.startsWith("Teaching: ");
-
-                  const isAssistantDiagnostic = msg.role === 'assistant' && (
-                    isPrevUserConfusion ||
-                    msg.content.includes("Likely Root Cause") ||
-                    msg.content.includes("Foundation First") ||
-                    msg.content.includes("Now It Should Click")
-                  );
-
-                  const isAssistantFeynman = msg.role === 'assistant' && (
-                    isPrevUserFeynman ||
-                    msg.content.includes("What You Got Right") ||
-                    msg.content.includes("Missing Pieces") ||
-                    msg.content.includes("Clarity Score") ||
-                    msg.content.includes("Try Again?")
-                  );
-
-                  const getLevelBadgeInfo = (text: string) => {
-                    const match = text.match(/Explain\s+[\s\S]+\s+at\s+(eli6|highschool|university|exam|interview)\s+level/i);
-                    if (!match) return null;
-                    const lvl = match[1].toLowerCase();
-                    switch (lvl) {
-                      case 'eli6':
-                        return { label: 'ELI6 Explanation', icon: '👶', color: 'bg-amber-500/20 text-amber-300 border-amber-500/30' };
-                      case 'highschool':
-                        return { label: 'High School Explanation', icon: '🏫', color: 'bg-blue-500/20 text-blue-300 border-blue-500/30' };
-                      case 'university':
-                        return { label: 'University Explanation', icon: '🎓', color: 'bg-[#4EC9D4]/20 text-[#4EC9D4] border-teal-500/30' };
-                      case 'exam':
-                        return { label: 'Model Exam Answer', icon: '📝', color: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' };
-                      case 'interview':
-                        return { label: 'Interview Answer', icon: '💼', color: 'bg-purple-500/20 text-purple-300 border-purple-500/30' };
-                      default:
-                        return null;
-                    }
-                  };
-
-                  const levelBadge = msg.role === 'user'
-                    ? getLevelBadgeInfo(msg.content)
-                    : (i > 0 && messages[i - 1]?.role === 'user' ? getLevelBadgeInfo(messages[i - 1].content) : null);
-
-                  return (
-                    <div key={i} className={`flex w-full ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                      <div
-                        className={`max-w-[85%] rounded-2xl p-4 text-sm leading-relaxed whitespace-pre-wrap ${
-                          msg.role === 'user' ? 'rounded-tr-xs font-medium' : 'rounded-tl-xs text-[#DAF1DE]'
-                        }`}
-                        style={{
-                          backgroundColor: isUserFeynman
-                            ? '#713f12'
-                            : isUserConfusion
-                            ? '#7e22ce'
-                            : msg.role === 'user'
-                            ? '#4EC9D4'
-                            : isAssistantFeynman
-                            ? '#182210'
-                            : isAssistantDiagnostic
-                            ? '#120B24'
-                            : '#0A1A1B',
-                          color: msg.role === 'user' ? (isUserConfusion || isUserFeynman ? '#fef08a' : '#040D0E') : '#DAF1DE',
-                          border: isAssistantFeynman
-                            ? '1px solid rgba(234, 179, 8, 0.4)'
-                            : isAssistantDiagnostic
-                            ? '1px solid rgba(168, 85, 247, 0.4)'
-                            : isUserFeynman
-                            ? '1px solid rgba(234, 179, 8, 0.5)'
-                            : isUserConfusion
-                            ? '1px solid rgba(192, 132, 252, 0.5)'
-                            : msg.role === 'assistant'
-                            ? '1px solid rgba(168,212,220,0.15)'
-                            : 'none',
-                          boxShadow: isAssistantFeynman
-                            ? '0 0 20px rgba(234, 179, 8, 0.15)'
-                            : isAssistantDiagnostic
-                            ? '0 0 20px rgba(168, 85, 247, 0.15)'
-                            : isUserFeynman
-                            ? '0 0 20px rgba(234, 179, 8, 0.25)'
-                            : isUserConfusion
-                            ? '0 0 20px rgba(168, 85, 247, 0.3)'
-                            : msg.role === 'user'
-                            ? '0 0 20px rgba(78,201,212,0.15)'
-                            : 'none',
-                        }}
-                      >
-                        {levelBadge && (
-                          <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border mb-2.5 ${levelBadge.color}`}>
-                            <span>{levelBadge.icon}</span>
-                            <span>{levelBadge.label}</span>
-                          </div>
-                        )}
-
-                        {isAssistantFeynman && (
-                          <div className="flex items-center justify-between flex-wrap gap-2 mb-2.5">
-                            <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold border bg-amber-500/20 text-amber-300 border-amber-500/30">
-                              <span>🎓</span>
-                              <span>Feynman Feedback</span>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => handleToggleSpeak(i, msg.content)}
-                              className={`px-2.5 py-1 rounded-lg text-xs font-semibold border flex items-center gap-1.5 transition-all cursor-pointer ${
-                                speakingMsgIndex === i
-                                  ? 'bg-amber-500/30 border-amber-400 text-amber-200 animate-pulse shadow-[0_0_12px_rgba(234,179,8,0.4)]'
-                                  : 'bg-amber-500/10 border-amber-500/20 text-amber-300 hover:bg-amber-500/20'
-                              }`}
-                            >
-                              <span>{speakingMsgIndex === i ? '🔊' : '🗣️'}</span>
-                              <span>{speakingMsgIndex === i ? 'Stop Reading' : 'Read Feedback Aloud'}</span>
-                            </button>
-                          </div>
-                        )}
-
-                        {isAssistantDiagnostic && !levelBadge && !isAssistantFeynman && (
-                          <div className="flex items-center gap-1.5 text-xs font-bold text-purple-300 mb-2 pb-2 border-b border-purple-500/25">
-                            <span className="text-sm">🔍</span>
-                            <span>AI Diagnostic Breakdown</span>
-                          </div>
-                        )}
-                        {msg.content}
-                        {isStreaming && i === messages.length - 1 && msg.role === 'assistant' && (
-                          <span className="inline-block w-2 h-4 ml-1 bg-[#4EC9D4] animate-pulse align-middle" style={{ borderRadius: 1 }} />
-                        )}
+                {/* Feynman Mode Interactive Two-Step Flow */}
+                {isFeynmanMode && (
+                  <div className="flex flex-col gap-3">
+                    {feynmanStep === 1 ? (
+                      <div className="p-4 rounded-xl border border-amber-200 bg-amber-50/60 flex flex-col gap-3">
+                        <div>
+                          <h4 className="font-sans font-semibold text-xs text-amber-900">Feynman Technique: Step 1</h4>
+                          <p className="text-xs text-amber-800 mt-0.5">Enter a concept you want to teach to test your understanding.</p>
+                        </div>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            placeholder="e.g. Binary Search Trees, Photosynthesis, Special Relativity..."
+                            value={feynmanTopic}
+                            onChange={(e) => setFeynmanTopic(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === 'Enter') handleStartFeynman(feynmanTopic); }}
+                            className="flex-1 px-3 py-1.5 rounded-lg border border-amber-200 bg-white text-xs font-medium text-[#1E3A4A] focus:outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleStartFeynman(feynmanTopic)}
+                            disabled={!feynmanTopic.trim()}
+                            className="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-white bg-amber-700 hover:bg-amber-800 disabled:opacity-50 transition-colors cursor-pointer"
+                          >
+                            Start Teaching
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
-
-                {chatLoading && (!isStreaming || (messages.length > 0 && messages[messages.length - 1].content === '')) && (
-                  <div className="flex w-full justify-start">
-                    <div className="max-w-[85%] rounded-2xl rounded-tl-xs p-4 flex items-center gap-2" style={{ backgroundColor: isFeynmanMode ? '#182210' : isConfusionMode ? '#120B24' : '#0A1A1B', border: isFeynmanMode ? '1px solid rgba(234,179,8,0.4)' : isConfusionMode ? '1px solid rgba(168,85,247,0.4)' : '1px solid rgba(168,212,220,0.15)' }}>
-                      <span className="text-xs text-[#8EB69B]">{isFeynmanMode ? 'AI is evaluating your explanation against course materials...' : explainLevel !== 'normal' ? `AI is generating ${explainLevel} explanation...` : isConfusionMode ? 'AI is diagnosing missing prerequisites...' : 'AI is analyzing your materials...'}</span>
-                      <span className={`h-1.5 w-1.5 rounded-full ${isFeynmanMode ? 'bg-amber-400' : isConfusionMode ? 'bg-purple-400' : 'bg-[#A8D4DC]'} animate-bounce`} style={{ animationDelay: '0ms' }} />
-                      <span className={`h-1.5 w-1.5 rounded-full ${isFeynmanMode ? 'bg-amber-400' : isConfusionMode ? 'bg-purple-400' : 'bg-[#A8D4DC]'} animate-bounce`} style={{ animationDelay: '150ms' }} />
-                      <span className={`h-1.5 w-1.5 rounded-full ${isFeynmanMode ? 'bg-amber-400' : isConfusionMode ? 'bg-purple-400' : 'bg-[#A8D4DC]'} animate-bounce`} style={{ animationDelay: '300ms' }} />
-                    </div>
+                    ) : (
+                      <form onSubmit={handleEvaluateFeynman} className="p-4 rounded-xl border border-amber-200 bg-amber-50/60 flex flex-col gap-3">
+                        <div className="flex items-center justify-between">
+                          <h4 className="font-sans font-semibold text-xs text-amber-900 flex items-center gap-2">
+                            <span>Teaching Concept: <strong className="text-amber-950 font-bold">{feynmanTopic}</strong></span>
+                            {isListening && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-100 text-red-700 text-[10px] font-semibold animate-pulse">
+                                <span className="w-1.5 h-1.5 rounded-full bg-red-600" />
+                                Listening...
+                              </span>
+                            )}
+                          </h4>
+                          <button
+                            type="button"
+                            onClick={() => setFeynmanStep(1)}
+                            className="text-[11px] text-amber-700 hover:underline cursor-pointer"
+                          >
+                            Change Topic
+                          </button>
+                        </div>
+                        <p className="text-xs text-amber-800">
+                          Explain this concept in your own words as if teaching a beginner:
+                        </p>
+                        <div className="relative">
+                          <textarea
+                            rows={3}
+                            placeholder="Explain here... Click the microphone icon to speak your explanation."
+                            value={feynmanExplanation}
+                            onChange={(e) => setFeynmanExplanation(e.target.value)}
+                            className="w-full px-3 py-2 pr-10 rounded-lg border border-amber-200 bg-white text-xs font-medium text-[#1E3A4A] focus:outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={handleToggleVoiceInput}
+                            title={isListening ? 'Stop recording' : 'Start voice input'}
+                            className={`absolute right-2.5 bottom-3.5 p-1.5 rounded-full transition-colors cursor-pointer ${
+                              isListening ? 'bg-red-500 text-white animate-pulse' : 'bg-amber-100 text-amber-800 hover:bg-amber-200'
+                            }`}
+                          >
+                            {isListening ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
+                          </button>
+                        </div>
+                        <div className="flex justify-end">
+                          <button
+                            type="submit"
+                            disabled={chatLoading || !feynmanExplanation.trim()}
+                            className="px-4 py-1.5 rounded-lg text-xs font-semibold text-white bg-amber-700 hover:bg-amber-800 disabled:opacity-50 transition-colors cursor-pointer"
+                          >
+                            Evaluate Explanation
+                          </button>
+                        </div>
+                      </form>
+                    )}
                   </div>
                 )}
-                <div ref={chatEndRef} />
-              </div>
 
-              {/* FEYNMAN TWO-STEP FLOW INPUT FORM */}
-              {isFeynmanMode ? (
-                <form onSubmit={feynmanStep === 1 ? (e) => { e.preventDefault(); if (feynmanTopic.trim()) setFeynmanStep(2); } : handleFeynmanSubmit} className="flex flex-col gap-3 p-4 rounded-2xl bg-[#141b0d] border border-amber-500/30">
-                  {feynmanStep === 1 ? (
-                    <div className="flex gap-2.5 items-center">
-                      <input
-                        type="text"
-                        placeholder="What topic do you want to teach?"
-                        value={feynmanTopic}
-                        onChange={(e) => setFeynmanTopic(e.target.value)}
-                        disabled={chatLoading}
-                        style={{ backgroundColor: '#0A1A1B', border: '1px solid rgba(234,179,8,0.3)', color: '#DAF1DE' }}
-                        className="flex-1 px-4 py-3.5 rounded-xl text-sm placeholder-amber-400/50 focus:outline-none focus:border-amber-400 transition-colors"
-                      />
-                      <button
-                        type="submit"
-                        disabled={!feynmanTopic.trim() || chatLoading}
-                        className="px-6 py-3.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-50 flex items-center gap-2 hover:shadow-lg shrink-0 cursor-pointer text-white"
-                        style={{ background: 'linear-gradient(135deg, #eab308 0%, #ca8a04 100%)', boxShadow: '0 0 15px rgba(234,179,8,0.3)' }}
-                      >
-                        <span>Next: Explain It</span>
-                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
-                      </button>
+                {/* Messages Box */}
+                <div className="h-80 overflow-y-auto flex flex-col gap-3 p-4 rounded-xl bg-[#F0F4F7] border border-[#E5E7EB]">
+                  {messages.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center h-full text-center text-xs text-[#6B7B85]">
+                      Ask a question based on your uploaded course materials to start practicing!
                     </div>
                   ) : (
-                    <div className="flex flex-col gap-3">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-amber-300 font-bold uppercase tracking-wider">Teaching Topic:</span>
-                          <span className="text-xs px-2.5 py-1 rounded-lg bg-amber-500/20 text-amber-200 border border-amber-500/30 font-semibold">{feynmanTopic}</span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setFeynmanStep(1)}
-                          className="text-xs text-amber-400/80 hover:text-amber-300 underline"
-                        >
-                          Change Topic
-                        </button>
-                      </div>
-
-                      <textarea
-                        rows={4}
-                        placeholder="Now explain it in your own words as if teaching someone..."
-                        value={feynmanExplanation}
-                        onChange={(e) => setFeynmanExplanation(e.target.value)}
-                        disabled={chatLoading}
-                        style={{ backgroundColor: '#0A1A1B', border: '1px solid rgba(234,179,8,0.3)', color: '#DAF1DE' }}
-                        className="w-full p-4 rounded-xl text-sm placeholder-amber-400/50 focus:outline-none focus:border-amber-400 transition-colors leading-relaxed"
-                      />
-
-                      <div className="flex items-center justify-between flex-wrap gap-3">
-                        {/* Voice Input Button & Recording Status Indicator */}
-                        {!isSpeechRecognitionSupported ? (
-                          <span className="text-xs text-amber-400/70 italic">Voice input not supported in this browser — try Chrome or Edge</span>
-                        ) : (
-                          <div className="flex items-center gap-2.5">
-                            <button
-                              type="button"
-                              onClick={handleToggleListening}
-                              disabled={chatLoading}
-                              className={`px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer ${
-                                isListening
-                                  ? 'bg-red-500/25 border border-red-500/50 text-red-300 shadow-[0_0_15px_rgba(239,68,68,0.4)] animate-pulse'
-                                  : 'bg-amber-500/15 border border-amber-500/30 text-amber-300 hover:bg-amber-500/25 shadow-[0_0_10px_rgba(234,179,8,0.15)]'
-                              }`}
-                            >
-                              <span>{isListening ? '⏹️' : '🎙️'}</span>
-                              <span>{isListening ? 'Stop Recording' : 'Voice Input'}</span>
-                            </button>
-
-                            {isListening && (
-                              <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-red-500/15 border border-red-500/30 text-red-300 text-xs font-medium animate-pulse">
-                                <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
-                                <span>Listening... Speak your explanation</span>
-                              </div>
-                            )}
-                          </div>
+                    messages.map((msg, i) => (
+                      <div
+                        key={i}
+                        className={`flex flex-col max-w-[85%] ${
+                          msg.role === 'user' ? 'ml-auto items-end' : 'mr-auto items-start'
+                        }`}
+                      >
+                        {msg.levelBadge && (
+                          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-[#2E7C87]/15 text-[#2E7C87] uppercase tracking-wide mb-1">
+                            {msg.levelBadge}
+                          </span>
                         )}
-
-                        <button
-                          type="submit"
-                          disabled={!feynmanExplanation.trim() || chatLoading}
-                          className="px-8 py-3.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-50 flex items-center gap-2 hover:shadow-lg shrink-0 cursor-pointer text-white"
-                          style={{ background: 'linear-gradient(135deg, #eab308 0%, #ca8a04 100%)', boxShadow: '0 0 20px rgba(234,179,8,0.35)' }}
+                        <div
+                          className={`px-4 py-2.5 rounded-2xl text-xs leading-relaxed ${
+                            msg.role === 'user'
+                              ? 'bg-[#1E3A4A] text-white rounded-br-none'
+                              : 'bg-white text-[#1E3A4A] border border-[#E5E7EB] rounded-bl-none shadow-xs'
+                          }`}
                         >
-                          <span>Get Feedback</span>
-                          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/></svg>
-                        </button>
+                          {msg.content || (chatLoading && i === messages.length - 1 ? 'Thinking...' : '')}
+                        </div>
+
+                        {/* Read Feedback Aloud Button using SpeechSynthesis */}
+                        {msg.role === 'assistant' && msg.content && (
+                          <button
+                            type="button"
+                            onClick={() => handleReadAloud(msg.content, i)}
+                            title={speakingMsgIndex === i ? 'Stop reading' : 'Read feedback aloud'}
+                            className={`p-1 rounded-md text-xs transition-colors self-start mt-1 cursor-pointer flex items-center gap-1 ${
+                              speakingMsgIndex === i ? 'text-[#2E7C87] bg-[#2E7C87]/10' : 'text-[#6B7B85] hover:text-[#1E3A4A]'
+                            }`}
+                          >
+                            {speakingMsgIndex === i ? (
+                              <>
+                                <VolumeX className="w-3.5 h-3.5 animate-pulse text-[#2E7C87]" />
+                                <span className="text-[10px] text-[#2E7C87] font-medium">Stop</span>
+                              </>
+                            ) : (
+                              <>
+                                <Volume2 className="w-3.5 h-3.5" />
+                                <span className="text-[10px] font-medium">Listen</span>
+                              </>
+                            )}
+                          </button>
+                        )}
                       </div>
-                    </div>
+                    ))
                   )}
-                </form>
-              ) : (
-                /* Standard Chat Input & Send Button Pinned at Bottom */
-                <form onSubmit={handleAskQuestion} className="flex gap-2.5 items-center flex-wrap md:flex-nowrap">
-                  <select
-                    value={explainLevel}
-                    onChange={(e) => setExplainLevel(e.target.value as ExplainLevel)}
-                    disabled={chatLoading}
-                    style={{
-                      backgroundColor: explainLevel !== 'normal' ? '#0d2228' : '#0A1A1B',
-                      border: explainLevel !== 'normal' ? '1px solid rgba(78,201,212,0.4)' : '1px solid rgba(168,212,220,0.18)',
-                      color: explainLevel !== 'normal' ? '#4EC9D4' : '#DAF1DE'
-                    }}
-                    className="px-3 py-3.5 rounded-xl text-xs font-semibold focus:outline-none focus:border-teal-400 cursor-pointer shrink-0"
-                    title="Select explanation depth level"
-                  >
-                    <option value="normal">Level: Normal</option>
-                    <option value="eli6">👶 ELI6</option>
-                    <option value="highschool">🏫 High School</option>
-                    <option value="university">🎓 University</option>
-                    <option value="exam">📝 Exam Answer</option>
-                    <option value="interview">💼 Interview Answer</option>
-                  </select>
+                  <div ref={chatEndRef} />
+                </div>
 
-                  <input
-                    type="text"
-                    placeholder={
-                      explainLevel !== 'normal'
-                        ? `Ask a topic to explain at ${explainLevel} level...`
-                        : isConfusionMode
-                        ? "What topic are you confused about?"
-                        : "Ask a question about this subject..."
-                    }
-                    value={currentQuestion}
-                    onChange={(e) => setCurrentQuestion(e.target.value)}
-                    disabled={chatLoading}
-                    style={{
-                      backgroundColor: explainLevel !== 'normal' ? '#091d21' : isConfusionMode ? '#140D28' : '#0A1A1B',
-                      border: explainLevel !== 'normal' ? '1px solid rgba(78,201,212,0.3)' : isConfusionMode ? '1px solid rgba(168,85,247,0.4)' : '1px solid rgba(168,212,220,0.18)',
-                      color: '#DAF1DE'
-                    }}
-                    className={`flex-1 px-4 py-3.5 rounded-xl text-sm focus:outline-none transition-colors min-w-[200px] ${
-                      explainLevel !== 'normal' ? 'placeholder-teal-400/50 focus:border-teal-400' : isConfusionMode ? 'placeholder-purple-400/50 focus:border-purple-400' : 'placeholder-[#235347] focus:border-teal-400'
-                    }`}
-                  />
-
-                  <button
-                    type="button"
-                    onClick={toggleConfusionMode}
-                    className={`px-3.5 py-3.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer border ${
-                      isConfusionMode
-                        ? 'bg-purple-600/30 border-purple-400 text-purple-300 shadow-[0_0_15px_rgba(168,85,247,0.3)]'
-                        : 'bg-[#0A1A1B] border-white/10 text-[#8EB69B] hover:text-[#DAF1DE]'
-                    }`}
-                    title="Toggle Confusion Detector mode"
-                  >
-                    {isConfusionMode ? "✓ Confused Mode" : "I'm Confused"}
-                  </button>
-
+                {/* Chat Form */}
+                <form onSubmit={handleAskQuestion} className="flex gap-2">
+                  <div className="relative flex-1">
+                    <input
+                      type="text"
+                      placeholder={
+                        explainLevel !== 'normal'
+                          ? `Ask question in ${explainLevel.toUpperCase()} mode...`
+                          : "Ask a question about this subject..."
+                      }
+                      value={currentQuestion}
+                      onChange={(e) => setCurrentQuestion(e.target.value)}
+                      disabled={chatLoading}
+                      className="w-full px-3 py-2 pr-9 rounded-lg border border-[#E5E7EB] text-xs font-medium text-[#1E3A4A] bg-white placeholder-[#6B7B85]/60 focus:outline-none focus:border-[#2E7C87]"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleToggleVoiceInput}
+                      title={isListening ? 'Stop voice input' : 'Voice input'}
+                      className={`absolute right-2 top-1.5 p-1 rounded-md transition-colors cursor-pointer ${
+                        isListening ? 'bg-red-500 text-white animate-pulse' : 'text-[#6B7B85] hover:text-[#1E3A4A]'
+                      }`}
+                    >
+                      {isListening ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
                   <button
                     type="submit"
                     disabled={chatLoading || !currentQuestion.trim()}
-                    className="px-6 py-3.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-50 flex items-center gap-2 hover:shadow-lg shrink-0 cursor-pointer"
-                    style={{
-                      background: explainLevel !== 'normal'
-                        ? 'linear-gradient(135deg, #4EC9D4 0%, #2563eb 100%)'
-                        : isConfusionMode
-                        ? 'linear-gradient(135deg, #c084fc 0%, #9333ea 100%)'
-                        : 'linear-gradient(135deg, #A8D4DC 0%, #4EC9D4 100%)',
-                      color: explainLevel !== 'normal' || isConfusionMode ? '#ffffff' : '#040D0E',
-                      boxShadow: explainLevel !== 'normal'
-                        ? '0 0 15px rgba(78,201,212,0.3)'
-                        : isConfusionMode
-                        ? '0 0 15px rgba(168,85,247,0.3)'
-                        : '0 0 15px rgba(168,212,220,0.2)'
-                    }}
+                    className="px-4 py-2 rounded-lg text-xs font-semibold text-white bg-[#2E7C87] hover:bg-[#256770] disabled:opacity-50 transition-colors flex items-center gap-1 shrink-0 cursor-pointer"
                   >
-                    <span>{explainLevel !== 'normal' ? 'Explain' : isConfusionMode ? 'Diagnose' : 'Send'}</span>
-                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+                    <Send className="w-3.5 h-3.5" />
+                    <span>Send</span>
                   </button>
                 </form>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* SECTION 5: PRACTICE QUIZ SECTION */}
-        <div
-          style={{
-            background: 'linear-gradient(145deg, #0c1e1f 0%, #0a1720 100%)',
-            border: '1px solid rgba(168,212,220,0.12)',
-          }}
-          className="rounded-3xl p-6 md:p-8 flex flex-col gap-6 w-full"
-        >
-          {/* Section Title Header */}
-          <div className="flex items-center justify-between flex-wrap gap-4 pb-4 border-b border-white/5">
-            <div className="flex items-center gap-3">
-              <div style={{ width: 40, height: 40, background: 'linear-gradient(135deg, #1e4a6e 0%, #0d3d3a 100%)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#7EC8E3' }}>
-                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
               </div>
-              <div>
-                <h2 className="font-jakarta font-bold text-xl" style={{ color: '#DAF1DE' }}>AI Practice Quiz</h2>
-                <p className="text-xs text-[#8EB69B]">Test your comprehension of uploaded study materials</p>
-              </div>
-            </div>
 
-            {/* View Mode Tag */}
-            {quizViewMode === 'taking' && (
-              <span className="text-xs font-semibold px-3 py-1.5 rounded-full bg-teal-500/10 text-[#4EC9D4] border border-teal-500/20">
-                Quiz in Progress ({userAnswers.filter(a => a !== '').length} / {quizQuestions.length} answered)
-              </span>
-            )}
-            {quizViewMode === 'results' && (
-              <span className="text-xs font-semibold px-3 py-1.5 rounded-full bg-indigo-500/10 text-[#7EC8E3] border border-indigo-500/20">
-                Quiz Completed
-              </span>
-            )}
-          </div>
-
-          {/* SETUP MODE */}
-          {quizViewMode === 'setup' && (() => {
-            const topicOptions = getKnowledgeMapTopicOptions();
-            const hasMap = topicOptions.length > 0;
-
-            return (
-              <div className="flex flex-col gap-6 my-2">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 p-6 rounded-2xl" style={{ backgroundColor: 'rgba(6, 14, 16, 0.6)', border: '1px solid rgba(168,212,220,0.08)' }}>
-                  <div className="flex flex-col gap-1 max-w-md">
-                    <h3 className="font-jakarta font-semibold text-base text-[#DAF1DE]">Ready to test your knowledge?</h3>
-                    <p className="text-xs text-[#8EB69B]">Select a topic and difficulty level to generate 5 AI-created multiple choice questions derived directly from your notes.</p>
+              {/* PRACTICE QUIZ & EXAM GENERATOR */}
+              <div className="bg-white rounded-2xl p-6 border border-[#E5E7EB] flex flex-col gap-4">
+                <div className="flex items-center justify-between pb-3 border-b border-[#E5E7EB]">
+                  <div className="flex items-center gap-2">
+                    <GraduationCap className="w-5 h-5 text-[#2E7C87]" />
+                    <h2 className="font-sans font-semibold text-base text-[#1E3A4A]">Practice Quiz & Exam Generator</h2>
                   </div>
+                  <span className="text-xs text-[#6B7B85]">AI-generated assessments</span>
+                </div>
 
-                  <div className="flex items-center gap-3 flex-wrap">
-                    {/* Topic Selector */}
-                    <div className="flex items-center gap-2">
-                      <label htmlFor="quiz-topic" className="text-xs font-medium text-[#8EB69B]">Topic:</label>
-                      <select
-                        id="quiz-topic"
-                        value={selectedQuizTopic}
-                        onChange={(e) => setSelectedQuizTopic(e.target.value)}
-                        disabled={quizLoading || !hasMap}
-                        style={{ backgroundColor: '#0A1A1B', border: '1px solid rgba(168,212,220,0.18)', color: '#DAF1DE' }}
-                        className="px-3.5 py-2.5 rounded-xl text-sm focus:outline-none focus:border-teal-400 cursor-pointer disabled:opacity-50 max-w-[200px] truncate"
-                        title={!hasMap ? 'Generate a Knowledge Map to unlock topic-specific quizzes' : 'Filter quiz by topic'}
-                      >
-                        <option value="">All Topics (General)</option>
-                        {hasMap ? (
-                          topicOptions.map((top, idx) => (
-                            <option key={idx} value={top}>{top}</option>
-                          ))
-                        ) : (
-                          <option value="" disabled>Generate a Knowledge Map to unlock topic-specific quizzes</option>
-                        )}
-                      </select>
+                {quizViewMode === 'setup' && (
+                  <div className="flex flex-col gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-[#6B7B85] mb-1 uppercase tracking-wide">
+                          Difficulty Level
+                        </label>
+                        <select
+                          value={quizDifficulty}
+                          onChange={(e) => setQuizDifficulty(e.target.value as any)}
+                          className="w-full px-3 py-2 rounded-lg border border-[#E5E7EB] text-xs font-medium text-[#1E3A4A] bg-white focus:outline-none focus:border-[#2E7C87]"
+                        >
+                          <option value="easy">Easy (Fundamentals)</option>
+                          <option value="medium">Medium (Standard Exam)</option>
+                          <option value="hard">Hard (Advanced Reasoning)</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-[#6B7B85] mb-1 uppercase tracking-wide">
+                          Focus Topic (Optional)
+                        </label>
+                        <select
+                          value={selectedQuizTopic}
+                          onChange={(e) => setSelectedQuizTopic(e.target.value)}
+                          className="w-full px-3 py-2 rounded-lg border border-[#E5E7EB] text-xs font-medium text-[#1E3A4A] bg-white focus:outline-none focus:border-[#2E7C87]"
+                        >
+                          <option value="">All Topics</option>
+                          {getKnowledgeMapTopicOptions().map((topic, i) => (
+                            <option key={i} value={topic}>{topic}</option>
+                          ))}
+                        </select>
+                      </div>
                     </div>
 
-                    {/* Difficulty selector */}
-                    <div className="flex items-center gap-2">
-                      <label htmlFor="quiz-difficulty" className="text-xs font-medium text-[#8EB69B]">Difficulty:</label>
-                      <select
-                        id="quiz-difficulty"
-                        value={quizDifficulty}
-                        onChange={(e) => setQuizDifficulty(e.target.value as 'easy' | 'medium' | 'hard')}
+                    <div className="flex gap-3">
+                      <button
+                        type="button"
+                        onClick={handleGenerateQuiz}
                         disabled={quizLoading}
-                        style={{ backgroundColor: '#0A1A1B', border: '1px solid rgba(168,212,220,0.18)', color: '#DAF1DE' }}
-                        className="px-3.5 py-2.5 rounded-xl text-sm focus:outline-none focus:border-teal-400 cursor-pointer"
+                        className="flex-1 py-2.5 rounded-lg text-xs font-semibold text-white bg-[#2E7C87] hover:bg-[#256770] disabled:opacity-50 transition-colors cursor-pointer"
                       >
-                        <option value="easy">Easy</option>
-                        <option value="medium">Medium</option>
-                        <option value="hard">Hard</option>
-                      </select>
-                    </div>
-
-                    {/* Generate Button */}
-                    <button
-                      onClick={handleGenerateQuiz}
-                      disabled={quizLoading}
-                      className="px-6 py-2.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-50 flex items-center gap-2 cursor-pointer hover:shadow-lg"
-                      style={{ background: 'linear-gradient(135deg, #A8D4DC 0%, #4EC9D4 100%)', color: '#040D0E', boxShadow: '0 0 15px rgba(168,212,220,0.2)' }}
-                    >
-                      {quizLoading ? (
-                        <>
-                          <svg className="animate-spin h-4 w-4 text-[#040D0E]" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/></svg>
-                          <span>Generating quiz...</span>
-                        </>
-                      ) : (
-                        <>
-                          <span>Generate Quiz</span>
-                          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-
-                {!hasMap && (
-                  <p className="text-xs text-amber-400/80 font-medium pl-1">
-                    💡 Note: Generate a Knowledge Map to unlock topic-specific quizzes.
-                  </p>
-                )}
-
-                {quizError && (
-                  <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm flex items-center gap-2">
-                    <svg className="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
-                    <span>{quizError}</span>
-                  </div>
-                )}
-              </div>
-            );
-          })()}
-
-          {/* TAKING MODE */}
-          {quizViewMode === 'taking' && (
-            <div className="flex flex-col gap-8 my-2">
-              <div className="flex flex-col gap-6">
-                {quizQuestions.map((q, qIndex) => {
-                  const selectedAnswer = userAnswers[qIndex];
-                  return (
-                    <div
-                      key={qIndex}
-                      className="p-6 md:p-7 rounded-2xl flex flex-col gap-4"
-                      style={{ backgroundColor: 'rgba(6, 14, 16, 0.6)', border: '1px solid rgba(168,212,220,0.1)' }}
-                    >
-                      <div className="flex items-start gap-3">
-                        <span className="flex items-center justify-center w-7 h-7 rounded-full bg-teal-500/10 text-[#4EC9D4] font-jakarta font-bold text-xs shrink-0">
-                          {qIndex + 1}
-                        </span>
-                        <h3 className="font-jakarta font-semibold text-base md:text-lg text-[#DAF1DE] pt-0.5">
-                          {q.question}
-                        </h3>
-                      </div>
-
-                      {/* Options Grid */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2 pl-0 md:pl-10">
-                        {q.options.map((opt, optIndex) => {
-                          const isSelected = selectedAnswer === opt;
-                          return (
-                            <button
-                              key={optIndex}
-                              type="button"
-                              onClick={() => handleSelectOption(qIndex, opt)}
-                              className={`p-4 rounded-xl text-sm font-medium text-left flex items-center justify-between gap-3 transition-all cursor-pointer ${
-                                isSelected
-                                  ? 'bg-[#4EC9D4]/10 border-2 border-[#4EC9D4] text-[#4EC9D4] shadow-[0_0_15px_rgba(78,201,212,0.15)]'
-                                  : 'bg-[#0A1A1B] border border-white/10 text-[#DAF1DE] hover:border-teal-500/30 hover:bg-[#0d2224]'
-                              }`}
-                            >
-                              <span>{opt}</span>
-                              <div
-                                className={`w-5 h-5 rounded-full border flex items-center justify-center shrink-0 transition-colors ${
-                                  isSelected ? 'border-[#4EC9D4] bg-[#4EC9D4]' : 'border-slate-600 bg-transparent'
-                                }`}
-                              >
-                                {isSelected && (
-                                  <div className="w-2 h-2 rounded-full bg-[#040D0E]" />
-                                )}
-                              </div>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {quizError && (
-                <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
-                  {quizError}
-                </div>
-              )}
-
-              {/* Submit Quiz Actions */}
-              <div className="flex items-center justify-between pt-4 border-t border-white/5 flex-wrap gap-4">
-                <button
-                  onClick={handleResetQuiz}
-                  className="px-5 py-2.5 rounded-xl text-sm font-medium text-[#8EB69B] hover:text-[#DAF1DE] transition-colors"
-                >
-                  Cancel Quiz
-                </button>
-
-                <button
-                  onClick={handleSubmitQuiz}
-                  disabled={!allAnswered || submittingQuiz}
-                  className="px-8 py-3.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 cursor-pointer hover:shadow-lg"
-                  style={{ background: 'linear-gradient(135deg, #A8D4DC 0%, #4EC9D4 100%)', color: '#040D0E', boxShadow: '0 0 20px rgba(168,212,220,0.25)' }}
-                >
-                  {submittingQuiz ? (
-                    <>
-                      <svg className="animate-spin h-4 w-4 text-[#040D0E]" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/></svg>
-                      <span>Submitting...</span>
-                    </>
-                  ) : (
-                    <>
-                      <span>Submit Quiz</span>
-                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/></svg>
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* RESULTS MODE */}
-          {quizViewMode === 'results' && quizResults && (
-            <div className="flex flex-col gap-8 my-2">
-              {/* Overall Score Card */}
-              <div
-                className="p-8 rounded-2xl flex flex-col md:flex-row items-center justify-between gap-6 text-center md:text-left"
-                style={{ backgroundColor: 'rgba(6, 14, 16, 0.7)', border: '1px solid rgba(168,212,220,0.15)' }}
-              >
-                <div className="flex flex-col gap-2">
-                  <span className="text-xs uppercase tracking-wider font-semibold text-[#8EB69B]">Quiz Score</span>
-                  <div className="flex items-baseline gap-3 justify-center md:justify-start">
-                    <span
-                      className={`text-5xl font-extrabold font-jakarta ${
-                        quizResults.score >= 80
-                          ? 'text-emerald-400'
-                          : quizResults.score >= 50
-                          ? 'text-amber-400'
-                          : 'text-rose-400'
-                      }`}
-                    >
-                      {quizResults.score}%
-                    </span>
-                    <span className="text-sm font-medium text-[#DAF1DE]">
-                      ({quizResults.correctCount} / {quizResults.totalQuestions} correct)
-                    </span>
-                  </div>
-                  <p className="text-xs text-[#8EB69B] mt-1">
-                    {quizResults.score >= 80
-                      ? 'Great job! This subject has been updated to your strong topics.'
-                      : quizResults.score >= 50
-                      ? 'Solid effort! Keep reviewing materials to improve your mastery.'
-                      : 'Needs review. This subject has been flagged in your weak topics for extra study.'}
-                  </p>
-                </div>
-
-                <button
-                  onClick={handleResetQuiz}
-                  className="px-6 py-3 rounded-xl text-sm font-semibold transition-all flex items-center gap-2 cursor-pointer hover:shadow-lg shrink-0"
-                  style={{ background: 'linear-gradient(135deg, #A8D4DC 0%, #4EC9D4 100%)', color: '#040D0E', boxShadow: '0 0 15px rgba(168,212,220,0.2)' }}
-                >
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-                  <span>Take Another Quiz</span>
-                </button>
-              </div>
-
-              {/* Individual Question Results */}
-              <div className="flex flex-col gap-6">
-                <h3 className="font-jakarta font-bold text-lg text-[#DAF1DE]">Detailed Results</h3>
-
-                {quizResults.results.map((resItem, idx) => (
-                  <div
-                    key={idx}
-                    className="p-6 rounded-2xl flex flex-col gap-4"
-                    style={{
-                      backgroundColor: 'rgba(6, 14, 16, 0.5)',
-                      border: resItem.isCorrect ? '1px solid rgba(74, 222, 128, 0.2)' : '1px solid rgba(248, 113, 113, 0.2)',
-                    }}
-                  >
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex items-start gap-3">
-                        <div
-                          className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs shrink-0 mt-0.5 ${
-                            resItem.isCorrect ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'
-                          }`}
-                        >
-                          {resItem.isCorrect ? '✓' : '✕'}
-                        </div>
-                        <h4 className="font-jakarta font-semibold text-base text-[#DAF1DE] pt-0.5">
-                          {idx + 1}. {resItem.question}
-                        </h4>
-                      </div>
-
-                      <span
-                        className={`text-xs font-semibold px-2.5 py-1 rounded-full shrink-0 ${
-                          resItem.isCorrect
-                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                            : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
-                        }`}
-                      >
-                        {resItem.isCorrect ? 'Correct' : 'Incorrect'}
-                      </span>
-                    </div>
-
-                    <div className="flex flex-col gap-2 pl-0 md:pl-10 text-sm">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-medium text-[#8EB69B] w-28 shrink-0">Your Answer:</span>
-                        <span className={`font-medium ${resItem.isCorrect ? 'text-emerald-400' : 'text-rose-400'}`}>
-                          {resItem.userAnswer || 'None selected'}
-                        </span>
-                      </div>
-
-                      {!resItem.isCorrect && (
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-medium text-[#8EB69B] w-28 shrink-0">Correct Answer:</span>
-                          <span className="font-medium text-emerald-400">{resItem.correctAnswer}</span>
-                        </div>
-                      )}
-
-                      {/* Explanation box */}
-                      <div className="mt-2 p-3.5 rounded-xl bg-[#0A1A1B] border border-white/5 text-xs text-[#8EB69B] leading-relaxed">
-                        <span className="font-semibold text-[#A8D4DC] block mb-1">Explanation:</span>
-                        {resItem.explanation}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* SECTION 6: EXAM SIMULATOR CARD */}
-        <div
-          style={{
-            background: 'linear-gradient(145deg, #180a1c 0%, #0a1720 100%)',
-            border: '1px solid rgba(244,63,94,0.2)',
-          }}
-          className="rounded-3xl p-6 md:p-8 flex flex-col gap-6 w-full"
-        >
-          {/* Header */}
-          <div className="flex items-center justify-between flex-wrap gap-4 pb-4 border-b border-white/5">
-            <div className="flex items-center gap-3">
-              <div style={{ width: 40, height: 40, background: 'linear-gradient(135deg, #501328 0%, #881337 100%)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fda4af' }}>
-                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <h2 className="font-jakarta font-bold text-xl" style={{ color: '#DAF1DE' }}>AI Exam Simulator</h2>
-                  <span className="text-[10px] uppercase tracking-wider font-extrabold px-2.5 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30">
-                    15 Questions • Timed Mock Exam
-                  </span>
-                </div>
-                <p className="text-xs text-[#8EB69B]">Simulate a full timed exam environment with comprehensive scoring and readiness evaluation</p>
-              </div>
-            </div>
-
-            {/* View Mode Badges */}
-            {examViewMode === 'taking' && (
-              <div className="flex items-center gap-2">
-                <span className="relative flex h-2.5 w-2.5">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500"></span>
-                </span>
-                <span className="text-xs font-semibold px-3 py-1.5 rounded-full bg-rose-500/10 text-rose-300 border border-rose-500/20">
-                  Exam Live ({examUserAnswers.filter(a => a !== '').length} / {examQuestions.length} answered)
-                </span>
-              </div>
-            )}
-            {examViewMode === 'results' && (
-              <span className="text-xs font-semibold px-3 py-1.5 rounded-full bg-rose-500/10 text-rose-300 border border-rose-500/20">
-                Exam Evaluation Completed
-              </span>
-            )}
-          </div>
-
-          {/* SETUP MODE */}
-          {examViewMode === 'setup' && (() => {
-            const topicOptions = getKnowledgeMapTopicOptions();
-            const hasMap = topicOptions.length > 0;
-
-            return (
-              <div className="flex flex-col gap-6 my-2">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 p-6 rounded-2xl" style={{ backgroundColor: 'rgba(6, 14, 16, 0.6)', border: '1px solid rgba(244,63,94,0.15)' }}>
-                  <div className="flex flex-col gap-1 max-w-md">
-                    <h3 className="font-jakarta font-semibold text-base text-[#DAF1DE]">Ready for a full Mock Exam?</h3>
-                    <p className="text-xs text-[#8EB69B]">Generate 15 comprehensive multiple-choice questions covering your study materials with a 20-minute timer limit.</p>
-                  </div>
-
-                  <div className="flex items-center gap-3 flex-wrap">
-                    {/* Topic Selector */}
-                    <div className="flex items-center gap-2">
-                      <label htmlFor="exam-topic" className="text-xs font-medium text-[#8EB69B]">Topic:</label>
-                      <select
-                        id="exam-topic"
-                        value={selectedExamTopic}
-                        onChange={(e) => setSelectedExamTopic(e.target.value)}
-                        disabled={examLoading || !hasMap}
-                        style={{ backgroundColor: '#0A1A1B', border: '1px solid rgba(244,63,94,0.3)', color: '#DAF1DE' }}
-                        className="px-3.5 py-2.5 rounded-xl text-sm focus:outline-none focus:border-rose-400 cursor-pointer disabled:opacity-50 max-w-[200px] truncate"
-                        title={!hasMap ? 'Generate a Knowledge Map to unlock topic-specific quizzes' : 'Filter exam by topic'}
-                      >
-                        <option value="">All Topics (General)</option>
-                        {hasMap ? (
-                          topicOptions.map((top, idx) => (
-                            <option key={idx} value={top}>{top}</option>
-                          ))
-                        ) : (
-                          <option value="" disabled>Generate a Knowledge Map to unlock topic-specific quizzes</option>
-                        )}
-                      </select>
-                    </div>
-
-                    {/* Difficulty Selector */}
-                    <div className="flex items-center gap-2">
-                      <label htmlFor="exam-difficulty" className="text-xs font-medium text-[#8EB69B]">Difficulty:</label>
-                      <select
-                        id="exam-difficulty"
-                        value={examDifficulty}
-                        onChange={(e) => setExamDifficulty(e.target.value as 'easy' | 'medium' | 'hard')}
+                        {quizLoading ? 'Generating Quiz...' : 'Generate Practice Quiz'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleGenerateExam}
                         disabled={examLoading}
-                        style={{ backgroundColor: '#0A1A1B', border: '1px solid rgba(244,63,94,0.3)', color: '#DAF1DE' }}
-                        className="px-3.5 py-2.5 rounded-xl text-sm focus:outline-none focus:border-rose-400 cursor-pointer"
+                        className="flex-1 py-2.5 rounded-lg text-xs font-semibold text-white bg-[#1E3A4A] hover:bg-[#152B37] disabled:opacity-50 transition-colors cursor-pointer"
                       >
-                        <option value="easy">Easy</option>
-                        <option value="medium">Medium</option>
-                        <option value="hard">Hard</option>
-                      </select>
+                        {examLoading ? 'Starting Exam...' : 'Start Timed Exam Mode'}
+                      </button>
                     </div>
-
-                    {/* Start Button */}
-                    <button
-                      onClick={handleStartExam}
-                      disabled={examLoading}
-                      className="px-6 py-2.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-50 flex items-center gap-2 cursor-pointer hover:shadow-lg"
-                      style={{ background: 'linear-gradient(135deg, #f43f5e 0%, #e11d48 100%)', color: '#ffffff', boxShadow: '0 0 15px rgba(244,63,94,0.3)' }}
-                    >
-                      {examLoading ? (
-                        <>
-                          <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/></svg>
-                          <span>Preparing your exam...</span>
-                        </>
-                      ) : (
-                        <>
-                          <span>Start Mock Exam</span>
-                          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-
-                {!hasMap && (
-                  <p className="text-xs text-amber-400/80 font-medium pl-1">
-                    💡 Note: Generate a Knowledge Map to unlock topic-specific quizzes.
-                  </p>
-                )}
-
-                {examError && (
-                  <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-sm flex items-center gap-2">
-                    <svg className="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
-                    <span>{examError}</span>
                   </div>
                 )}
-              </div>
-            );
-          })()}
 
-          {/* TAKING MODE */}
-          {examViewMode === 'taking' && (
-            <div className="flex flex-col gap-6 my-2">
-              {/* Sticky Timer Banner */}
-              <div className="sticky top-4 z-20 flex items-center justify-between p-4 rounded-2xl bg-[#1c080e]/90 border border-rose-500/40 backdrop-blur-md shadow-[0_0_25px_rgba(244,63,94,0.25)] flex-wrap gap-4">
-                <div className="flex items-center gap-3">
-                  <span className="relative flex h-3 w-3">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-3 w-3 bg-rose-500"></span>
-                  </span>
-                  <div>
-                    <span className="font-jakarta font-bold text-sm text-rose-200 block">Exam Simulator in Progress</span>
-                    <span className="text-xs text-[#8EB69B]">{examQuestions.length} Questions • Scroll to complete all questions</span>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-3">
-                  <span className="text-xs text-rose-300 font-semibold uppercase tracking-wider">Time Remaining:</span>
-                  <div className="px-5 py-2 rounded-xl bg-rose-950/90 border border-rose-500/60 font-mono font-extrabold text-2xl text-rose-400 tracking-wider shadow-[0_0_15px_rgba(244,63,94,0.4)]">
-                    {formatTimerMMSS(examRemainingSeconds)}
-                  </div>
-                </div>
-              </div>
-
-              {/* 15 Questions Scrollable Container */}
-              <div className="flex flex-col gap-6">
-                {examQuestions.map((q, qIndex) => {
-                  const selectedAnswer = examUserAnswers[qIndex];
-                  return (
-                    <div
-                      key={qIndex}
-                      className="p-6 md:p-7 rounded-2xl flex flex-col gap-4 transition-all hover:border-rose-500/30"
-                      style={{ backgroundColor: 'rgba(6, 14, 16, 0.65)', border: '1px solid rgba(244,63,94,0.15)' }}
-                    >
-                      <div className="flex items-start gap-3">
-                        <span className="flex items-center justify-center w-8 h-8 rounded-full bg-rose-500/15 text-rose-300 font-jakarta font-bold text-xs shrink-0">
-                          {qIndex + 1}
-                        </span>
-                        <h3 className="font-jakarta font-semibold text-base md:text-lg text-[#DAF1DE] pt-0.5">
-                          {q.question}
-                        </h3>
+                {quizViewMode === 'taking' && (
+                  <div className="flex flex-col gap-4">
+                    {/* Prominent Countdown Clock Display for Timed Exam Mode */}
+                    {examTimeRemaining > 0 && (
+                      <div className="flex items-center justify-between p-4 bg-[#1E3A4A] text-white rounded-xl">
+                        <div className="flex items-center gap-2">
+                          <Clock className="w-4 h-4 text-[#2E7C87]" />
+                          <span className="font-sans font-semibold text-xs uppercase tracking-wide">Timed Exam Mode</span>
+                        </div>
+                        <div className="flex items-center gap-2 font-mono text-base font-bold [font-variant-numeric:tabular-nums]">
+                          <span className={examTimeRemaining < 60 ? 'text-red-400 animate-pulse' : 'text-[#2E7C87]'}>
+                            {formatElapsedTime(examTimeRemaining)}
+                          </span>
+                          <span className="text-xs font-normal text-gray-300">Remaining</span>
+                        </div>
                       </div>
+                    )}
 
-                      {/* Options Grid */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2 pl-0 md:pl-11">
-                        {q.options.map((opt, optIndex) => {
-                          const isSelected = selectedAnswer === opt;
-                          return (
+                    <h3 className="font-sans font-semibold text-sm text-[#1E3A4A]">
+                      {examTimeRemaining > 0 ? 'Timed Exam in Progress' : 'Practice Quiz in Progress'}
+                    </h3>
+                    {quizQuestions.map((q, idx) => (
+                      <div key={idx} className="p-4 rounded-xl border border-[#E5E7EB] bg-[#F0F4F7] flex flex-col gap-2">
+                        <p className="text-xs font-semibold text-[#1E3A4A]">
+                          {idx + 1}. {q.question}
+                        </p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-1">
+                          {q.options?.map((opt, optIdx) => (
                             <button
-                              key={optIndex}
+                              key={optIdx}
                               type="button"
-                              onClick={() => handleSelectExamOption(qIndex, opt)}
-                              className={`p-4 rounded-xl text-sm font-medium text-left flex items-center justify-between gap-3 transition-all cursor-pointer ${
-                                isSelected
-                                  ? 'bg-rose-500/15 border-2 border-rose-400 text-rose-200 shadow-[0_0_15px_rgba(244,63,94,0.2)]'
-                                  : 'bg-[#0A1A1B] border border-white/10 text-[#DAF1DE] hover:border-rose-500/30 hover:bg-[#1f0d14]'
+                              onClick={() => handleSelectQuizOption(idx, opt)}
+                              className={`p-2 rounded-lg text-xs font-medium text-left border transition-colors cursor-pointer ${
+                                userAnswers[idx] === opt
+                                  ? 'bg-[#2E7C87] text-white border-[#2E7C87]'
+                                  : 'bg-white text-[#1E3A4A] border-[#E5E7EB] hover:bg-gray-50'
                               }`}
                             >
-                              <span>{opt}</span>
-                              <div
-                                className={`w-5 h-5 rounded-full border flex items-center justify-center shrink-0 transition-colors ${
-                                  isSelected ? 'border-rose-400 bg-rose-500' : 'border-slate-600 bg-transparent'
-                                }`}
-                              >
-                                {isSelected && (
-                                  <div className="w-2 h-2 rounded-full bg-white" />
-                                )}
-                              </div>
+                              {opt}
                             </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {examError && (
-                <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-sm">
-                  {examError}
-                </div>
-              )}
-
-              {/* Submit Exam Actions */}
-              <div className="flex items-center justify-between pt-6 border-t border-white/10 flex-wrap gap-4">
-                <button
-                  type="button"
-                  onClick={handleResetExam}
-                  className="px-5 py-2.5 rounded-xl text-sm font-medium text-[#8EB69B] hover:text-[#DAF1DE] transition-colors"
-                >
-                  Cancel Exam
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleSubmitExam()}
-                  disabled={submittingExam}
-                  className="px-8 py-3.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 cursor-pointer hover:shadow-lg"
-                  style={{ background: 'linear-gradient(135deg, #f43f5e 0%, #e11d48 100%)', color: '#ffffff', boxShadow: '0 0 20px rgba(244,63,94,0.3)' }}
-                >
-                  {submittingExam ? (
-                    <>
-                      <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/></svg>
-                      <span>Submitting Exam...</span>
-                    </>
-                  ) : (
-                    <>
-                      <span>Submit Exam</span>
-                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/></svg>
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* RESULTS MODE */}
-          {examViewMode === 'results' && examResults && (
-            <div className="flex flex-col gap-8 my-2">
-              {/* Overall Score & Readiness Header */}
-              <div
-                className="p-8 rounded-2xl flex flex-col md:flex-row items-center justify-between gap-6 text-center md:text-left"
-                style={{ backgroundColor: 'rgba(6, 14, 16, 0.7)', border: '1px solid rgba(244,63,94,0.25)' }}
-              >
-                <div className="flex flex-col gap-3">
-                  <div className="flex items-center gap-4 justify-center md:justify-start flex-wrap">
-                    <span className="text-xs uppercase tracking-wider font-semibold text-[#8EB69B]">Mock Exam Score</span>
-                    <span className="text-xs font-semibold px-3 py-1 rounded-full bg-rose-500/10 text-rose-300 border border-rose-500/20">
-                      ⏱ Time Taken: {formatExamTimeTaken(examTimeTakenSeconds)}
-                    </span>
-                  </div>
-
-                  <div className="flex items-baseline gap-3 justify-center md:justify-start">
-                    <span
-                      className={`text-5xl font-extrabold font-jakarta ${
-                        examResults.score >= 80
-                          ? 'text-emerald-400'
-                          : examResults.score >= 50
-                          ? 'text-amber-400'
-                          : 'text-rose-400'
-                      }`}
-                    >
-                      {examResults.score}%
-                    </span>
-                    <span className="text-sm font-medium text-[#DAF1DE]">
-                      ({examResults.correctCount} / {examResults.totalQuestions} correct)
-                    </span>
-                  </div>
-
-                  {/* Readiness Banner */}
-                  <div
-                    className={`mt-1 p-3.5 rounded-xl border flex items-center gap-3 text-xs font-semibold ${
-                      examResults.score >= 80
-                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
-                        : examResults.score >= 50
-                        ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
-                        : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
-                    }`}
-                  >
-                    <span className="text-base">
-                      {examResults.score >= 80 ? '🎯' : examResults.score >= 50 ? '📈' : '⚠️'}
-                    </span>
-                    <span>
-                      {examResults.score >= 80
-                        ? "Exam Readiness: You're ready! Excellent overall mastery across all topics."
-                        : examResults.score >= 50
-                        ? "Exam Readiness: Getting there, review your weak areas before exam day."
-                        : "Exam Readiness: More preparation needed. Focus on foundational materials and retake."}
-                    </span>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={handleResetExam}
-                  className="px-6 py-3 rounded-xl text-sm font-semibold transition-all flex items-center gap-2 cursor-pointer hover:shadow-lg shrink-0"
-                  style={{ background: 'linear-gradient(135deg, #f43f5e 0%, #e11d48 100%)', color: '#ffffff', boxShadow: '0 0 15px rgba(244,63,94,0.3)' }}
-                >
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-                  <span>Take Another Mock Exam</span>
-                </button>
-              </div>
-
-              {/* Detailed Breakdown */}
-              <div className="flex flex-col gap-6">
-                <h3 className="font-jakarta font-bold text-lg text-[#DAF1DE]">Exam Detailed Results</h3>
-
-                {examResults.results.map((resItem, idx) => (
-                  <div
-                    key={idx}
-                    className="p-6 rounded-2xl flex flex-col gap-4"
-                    style={{
-                      backgroundColor: 'rgba(6, 14, 16, 0.5)',
-                      border: resItem.isCorrect ? '1px solid rgba(74, 222, 128, 0.2)' : '1px solid rgba(248, 113, 113, 0.2)',
-                    }}
-                  >
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex items-start gap-3">
-                        <div
-                          className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs shrink-0 mt-0.5 ${
-                            resItem.isCorrect ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'
-                          }`}
-                        >
-                          {resItem.isCorrect ? '✓' : '✕'}
+                          ))}
                         </div>
-                        <h4 className="font-jakarta font-semibold text-base text-[#DAF1DE] pt-0.5">
-                          {idx + 1}. {resItem.question}
-                        </h4>
                       </div>
-
-                      <span
-                        className={`text-xs font-semibold px-2.5 py-1 rounded-full shrink-0 ${
-                          resItem.isCorrect
-                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                            : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
-                        }`}
+                    ))}
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (examTimerIntervalRef.current) clearInterval(examTimerIntervalRef.current);
+                          setQuizViewMode('setup');
+                        }}
+                        className="px-4 py-2 rounded-lg text-xs font-medium text-[#6B7B85] hover:bg-gray-100 cursor-pointer"
                       >
-                        {resItem.isCorrect ? 'Correct' : 'Incorrect'}
-                      </span>
-                    </div>
-
-                    <div className="flex flex-col gap-2 pl-0 md:pl-10 text-sm">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-medium text-[#8EB69B] w-28 shrink-0">Your Answer:</span>
-                        <span className={`font-medium ${resItem.isCorrect ? 'text-emerald-400' : 'text-rose-400'}`}>
-                          {resItem.userAnswer || 'None selected'}
-                        </span>
-                      </div>
-
-                      {!resItem.isCorrect && (
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-medium text-[#8EB69B] w-28 shrink-0">Correct Answer:</span>
-                          <span className="font-medium text-emerald-400">{resItem.correctAnswer}</span>
-                        </div>
-                      )}
-
-                      {/* Explanation Box */}
-                      <div className="mt-2 p-3.5 rounded-xl bg-[#0A1A1B] border border-white/5 text-xs text-[#8EB69B] leading-relaxed">
-                        <span className="font-semibold text-[#A8D4DC] block mb-1">Explanation:</span>
-                        {resItem.explanation}
-                      </div>
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleSubmitQuiz}
+                        disabled={submittingQuiz}
+                        className="px-4 py-2 rounded-lg text-xs font-semibold text-white bg-[#2E7C87] hover:bg-[#256770] cursor-pointer"
+                      >
+                        Submit Answers
+                      </button>
                     </div>
                   </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
+                )}
 
-        {/* SECTION 7: QUIZ HISTORY SECTION */}
-        <div
-          style={{
-            background: 'linear-gradient(145deg, #0a1b24 0%, #09141c 100%)',
-            border: '1px solid rgba(168,212,220,0.12)',
-          }}
-          className="rounded-3xl p-6 md:p-8 flex flex-col gap-6 w-full"
-        >
-          {/* Header */}
-          <div className="flex items-center justify-between flex-wrap gap-4 pb-4 border-b border-white/5">
-            <div className="flex items-center gap-3">
-              <div style={{ width: 40, height: 40, background: 'linear-gradient(135deg, #1e3a4a 0%, #0f2b38 100%)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#4EC9D4' }}>
-                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-              </div>
-              <div>
-                <h2 className="font-jakarta font-bold text-xl" style={{ color: '#DAF1DE' }}>Quiz & Exam History</h2>
-                <p className="text-xs text-[#8EB69B]">Review past attempts, questions, and performance over time</p>
-              </div>
-            </div>
-
-            {/* Toggle Button */}
-            <button
-              type="button"
-              onClick={() => {
-                if (!showQuizHistory) fetchQuizHistory();
-                setShowQuizHistory(!showQuizHistory);
-              }}
-              className="px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer border"
-              style={{
-                backgroundColor: showQuizHistory ? '#0D2A30' : '#0A1A1B',
-                borderColor: showQuizHistory ? 'rgba(78,201,212,0.4)' : 'rgba(168,212,220,0.18)',
-                color: showQuizHistory ? '#4EC9D4' : '#DAF1DE',
-              }}
-            >
-              <span>📜</span>
-              <span>{showQuizHistory ? 'Hide Past Attempts' : 'View Past Attempts'}</span>
-              <span className="px-2 py-0.5 rounded-full text-[10px] bg-teal-500/20 text-[#4EC9D4] font-bold">
-                {quizHistory.length}
-              </span>
-            </button>
-          </div>
-
-          {/* History Content */}
-          {showQuizHistory && (
-            <div className="flex flex-col gap-4">
-              {historyLoading ? (
-                <div className="flex justify-center py-8">
-                  <svg className="animate-spin h-6 w-6 text-[#A8D4DC]" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/></svg>
-                </div>
-              ) : quizHistory.length === 0 ? (
-                <div className="text-center py-8 px-4 text-xs rounded-2xl border border-dashed border-[#1a3a38] text-[#346659]">
-                  No quizzes taken yet for this subject.
-                </div>
-              ) : (
-                quizHistory.map((item) => {
-                  const isExpanded = expandedHistoryId === item._id;
-                  const formattedDate = new Date(item.takenAt || item.createdAt || Date.now()).toLocaleString('en-US', {
-                    month: 'short',
-                    day: 'numeric',
-                    year: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  });
-
-                  // Color coding score
-                  let scoreColorClass = 'bg-rose-500/10 text-rose-400 border-rose-500/20';
-                  if (item.score >= 80) {
-                    scoreColorClass = 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
-                  } else if (item.score >= 50) {
-                    scoreColorClass = 'bg-amber-500/10 text-amber-400 border-amber-500/20';
-                  }
-
-                  return (
-                    <div
-                      key={item._id}
-                      className="rounded-2xl overflow-hidden transition-all"
-                      style={{
-                        backgroundColor: 'rgba(6, 14, 16, 0.6)',
-                        border: isExpanded ? '1px solid rgba(78,201,212,0.3)' : '1px solid rgba(168,212,220,0.1)',
-                      }}
+                {quizViewMode === 'results' && quizResults && (
+                  <div className="flex flex-col gap-4 text-center py-4">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-[#6B7B85]">Quiz Results</span>
+                    <p className="text-3xl font-semibold text-[#1E3A4A] [font-variant-numeric:tabular-nums]">
+                      {quizResults.score}%
+                    </p>
+                    <p className="text-xs text-[#6B7B85]">
+                      Correct: {quizResults.correctCount} / {quizResults.totalQuestions}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setQuizViewMode('setup')}
+                      className="self-center px-4 py-2 rounded-lg text-xs font-semibold text-white bg-[#2E7C87] hover:bg-[#256770] cursor-pointer"
                     >
-                      {/* Compact Row */}
-                      <div
-                        onClick={() => setExpandedHistoryId(isExpanded ? null : item._id)}
-                        className="p-4 md:p-5 flex items-center justify-between gap-4 cursor-pointer hover:bg-white/5 transition-colors flex-wrap md:flex-nowrap"
-                      >
-                        <div className="flex items-center gap-3 flex-wrap">
-                          {/* Score Pill */}
-                          <div className={`px-3 py-1.5 rounded-xl border text-sm font-extrabold tracking-wide font-jakarta ${scoreColorClass}`}>
-                            {item.score}%
-                          </div>
+                      Take Another Quiz
+                    </button>
+                  </div>
+                )}
 
-                          {/* Mode Badge */}
-                          {item.examMode ? (
-                            <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-rose-500/20 text-rose-300 border border-rose-500/30">
-                              ⏱ Mock Exam
-                            </span>
-                          ) : (
-                            <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-teal-500/10 text-[#4EC9D4] border border-teal-500/20">
-                              📝 Quiz
-                            </span>
-                          )}
+              </div>
 
-                          {/* Difficulty Badge */}
-                          <span className="text-xs font-medium px-2 py-0.5 rounded-md bg-white/5 text-[#8EB69B] uppercase tracking-wider">
-                            {item.difficulty}
-                          </span>
+            </div>
 
-                          {/* Topic Badge if topic-specific */}
-                          {item.topic && (
-                            <span className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-amber-500/15 text-amber-300 border border-amber-500/30 truncate max-w-[200px]">
-                              📌 {item.topic}
-                            </span>
-                          )}
-                        </div>
+          </div>
 
-                        <div className="flex items-center gap-4 text-xs text-[#8EB69B] shrink-0">
-                          <span>{formattedDate}</span>
-                          <span className="text-sm text-[#4EC9D4] font-bold">
-                            {isExpanded ? '▲ Hide Breakdown' : '▼ Review Breakdown'}
-                          </span>
-                        </div>
+          {/* Badge Unlocked Celebration Modal */}
+          {unlockedBadgesModal && unlockedBadgesModal.length > 0 && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs">
+              <div className="bg-white rounded-2xl p-6 border border-[#E5E7EB] shadow-2xl max-w-md w-full flex flex-col items-center text-center gap-4">
+                <div className="w-14 h-14 rounded-2xl bg-[#2E7C87]/10 text-[#2E7C87] flex items-center justify-center">
+                  <Trophy className="w-7 h-7" />
+                </div>
+                <div>
+                  <span className="text-xs font-mono font-bold uppercase tracking-wider text-[#2E7C87]">Achievement Unlocked!</span>
+                  <h3 className="font-sans font-semibold text-lg text-[#1E3A4A] mt-0.5">
+                    {unlockedBadgesModal.length === 1 ? 'New Badge Earned!' : 'New Badges Earned!'}
+                  </h3>
+                </div>
+
+                <div className="flex flex-col gap-2 w-full">
+                  {unlockedBadgesModal.map((bId) => (
+                    <div key={bId} className="p-3 rounded-xl bg-[#F0F4F7] border border-[#E5E7EB] flex items-center gap-3 text-left">
+                      <div className="w-9 h-9 rounded-lg bg-[#2E7C87] text-white flex items-center justify-center shrink-0">
+                        <Award className="w-5 h-5" />
                       </div>
-
-                      {/* Inline Question Breakdown */}
-                      {isExpanded && (
-                        <div className="p-5 border-t border-white/5 bg-[#061012] flex flex-col gap-5">
-                          <h4 className="font-jakarta font-bold text-sm text-[#DAF1DE] flex items-center justify-between">
-                            <span>Question Breakdown ({item.questions?.length || 0} questions)</span>
-                            {item.timeTakenSeconds ? (
-                              <span className="text-xs font-normal text-[#8EB69B]">
-                                Time taken: {Math.floor(item.timeTakenSeconds / 60)}m {item.timeTakenSeconds % 60}s
-                              </span>
-                            ) : null}
-                          </h4>
-
-                          <div className="flex flex-col gap-4">
-                            {item.questions && item.questions.map((q, qIdx) => (
-                              <div
-                                key={qIdx}
-                                className="p-4 rounded-xl flex flex-col gap-2.5"
-                                style={{ backgroundColor: 'rgba(10, 26, 27, 0.8)', border: '1px solid rgba(168,212,220,0.08)' }}
-                              >
-                                <div className="flex items-start gap-2.5 text-sm font-semibold text-[#DAF1DE]">
-                                  <span className="text-xs font-bold text-[#4EC9D4] shrink-0 mt-0.5">{qIdx + 1}.</span>
-                                  <span>{q.question}</span>
-                                </div>
-
-                                <div className="flex flex-col gap-1.5 pl-6 text-xs">
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-[#8EB69B] w-24 shrink-0 font-medium">Correct Answer:</span>
-                                    <span className="text-emerald-400 font-semibold">{q.correctAnswer}</span>
-                                  </div>
-
-                                  <div className="mt-1 p-3 rounded-lg bg-[#071315] border border-white/5 text-[#8EB69B]">
-                                    <span className="font-bold text-[#A8D4DC] block mb-0.5">Explanation:</span>
-                                    {q.explanation}
-                                  </div>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
+                      <div>
+                        <h4 className="font-sans font-semibold text-xs text-[#1E3A4A] capitalize">{bId.replace('_', ' ')}</h4>
+                        <p className="text-[11px] text-[#6B7B85]">Keep studying to unlock more badges!</p>
+                      </div>
                     </div>
-                  );
-                })
-              )}
-            </div>
-          )}
-          {/* SECTION 7: QUIZ HISTORY SECTION END */}
-      </div>
+                  ))}
+                </div>
 
-      {/* Floating XP Gain Animations */}
-      <style>{`
-        @keyframes floatUp {
-          0% { opacity: 0; transform: translateY(15px) scale(0.85); }
-          25% { opacity: 1; transform: translateY(0) scale(1.1); }
-          75% { opacity: 1; transform: translateY(-30px) scale(1); }
-          100% { opacity: 0; transform: translateY(-55px) scale(0.9); }
-        }
-      `}</style>
-
-      <div className="fixed top-24 right-10 z-50 pointer-events-none flex flex-col gap-2">
-        {xpPopups.map((popup) => (
-          <div
-            key={popup.id}
-            className="font-jakarta font-extrabold text-base px-4 py-2 rounded-2xl bg-teal-400 text-slate-950 shadow-[0_0_25px_rgba(78,201,212,0.8)] border border-teal-200 flex items-center gap-2"
-            style={{ animation: 'floatUp 2.2s ease-out forwards' }}
-          >
-            <span className="text-lg">⚡</span>
-            <span>+{popup.amount} XP</span>
-          </div>
-        ))}
-      </div>
-
-      {/* Level Up Modal */}
-      {levelUpModal && (
-        <div
-          onClick={() => setLevelUpModal(null)}
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md cursor-pointer animate-fade-in"
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              background: 'linear-gradient(135deg, #0c2428 0%, #151233 100%)',
-              border: '2px solid #4EC9D4',
-              boxShadow: '0 0 60px rgba(78,201,212,0.5)',
-            }}
-            className="rounded-3xl p-8 max-w-md w-full text-center flex flex-col items-center gap-5 relative overflow-hidden"
-          >
-            <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-teal-400 to-blue-600 flex flex-col items-center justify-center text-white font-jakarta font-extrabold shadow-[0_0_35px_rgba(78,201,212,0.6)] animate-bounce">
-              <span className="text-[10px] uppercase tracking-widest opacity-80">LEVEL</span>
-              <span className="text-3xl">{levelUpModal.level}</span>
-            </div>
-
-            <div>
-              <span className="text-xs font-bold uppercase tracking-widest text-[#4EC9D4]">LEVEL UP!</span>
-              <h2 className="font-jakarta font-bold text-2xl text-white mt-1">You're now Level {levelUpModal.level}!</h2>
-              <p className="text-xs text-[#8EB69B] mt-2">Awesome work! Your knowledge and study consistency are paying off.</p>
-            </div>
-
-            <button
-              onClick={() => setLevelUpModal(null)}
-              className="px-6 py-2.5 rounded-xl text-xs font-semibold bg-teal-400 text-slate-950 shadow-lg hover:bg-teal-300 transition-all cursor-pointer"
-            >
-              Continue Learning →
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* New Badge Unlocked Modal */}
-      {badgeModal && (
-        <div
-          onClick={() => setBadgeModal(null)}
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md cursor-pointer animate-fade-in"
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              background: 'linear-gradient(135deg, #1c1809 0%, #201409 100%)',
-              border: '2px solid #fbbf24',
-              boxShadow: '0 0 60px rgba(251,191,36,0.4)',
-            }}
-            className="rounded-3xl p-8 max-w-md w-full text-center flex flex-col items-center gap-5 relative overflow-hidden"
-          >
-            <div className="text-6xl animate-bounce">🏆</div>
-
-            <div>
-              <span className="text-xs font-bold uppercase tracking-widest text-amber-400">NEW BADGE UNLOCKED!</span>
-              <div className="flex flex-col gap-2 mt-3">
-                {badgeModal.badges.map((bId) => {
-                  const b = BADGE_MAP[bId] || { name: bId, emoji: '🏅' };
-                  return (
-                    <div key={bId} className="px-4 py-2.5 rounded-2xl bg-amber-500/20 border border-amber-500/30 font-jakarta font-bold text-lg text-amber-200 flex items-center justify-center gap-2">
-                      <span>{b.emoji}</span>
-                      <span>{b.name}</span>
-                    </div>
-                  );
-                })}
+                <button
+                  type="button"
+                  onClick={() => setUnlockedBadgesModal(null)}
+                  className="w-full py-2.5 rounded-lg text-xs font-semibold text-white bg-[#2E7C87] hover:bg-[#256770] transition-colors cursor-pointer"
+                >
+                  Awesome! Continue
+                </button>
               </div>
             </div>
+          )}
 
-            <button
-              onClick={() => setBadgeModal(null)}
-              className="px-6 py-2.5 rounded-xl text-xs font-semibold bg-amber-400 text-slate-950 shadow-lg hover:bg-amber-300 transition-all cursor-pointer"
-            >
-              Awesome!
-            </button>
-          </div>
         </div>
-      )}
-
-      {/* Perfect Score Celebration Toast */}
-      {perfectScoreToast && (
-        <div className="fixed top-8 left-1/2 -translate-x-1/2 z-50 p-4 px-8 rounded-2xl bg-gradient-to-r from-amber-500 via-rose-500 to-teal-400 text-slate-950 font-jakarta font-black text-xl tracking-wider shadow-[0_0_50px_rgba(251,191,36,0.8)] border border-amber-200 animate-bounce flex items-center gap-3">
-          <span>💯</span>
-          <span>PERFECT SCORE! 100% CORRECT!</span>
-          <span>🎉</span>
-        </div>
-      )}
-    </div>
+      </main>
     </div>
   );
 };

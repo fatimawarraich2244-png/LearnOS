@@ -1,19 +1,54 @@
 const UserStats = require('../models/UserStats');
+const { sanitizeObjectStrings } = require('../utils/sanitize');
 
 // ── @desc   Get gamification stats for logged-in user
 // ── @route  GET /api/stats
 // ── @access Private
 const getUserStats = async (req, res) => {
   try {
+    const { updateWeeklyProgress } = require('../services/gamification');
     let stats = await UserStats.findOne({ userId: req.userId });
 
     if (!stats) {
       stats = await UserStats.create({ userId: req.userId });
     }
 
+    await updateWeeklyProgress(req.userId);
+    stats = await UserStats.findOne({ userId: req.userId });
+
+    console.log('[DEBUG getUserStats] req.userId:', req.userId);
+    console.log('[DEBUG getUserStats] stats:', stats);
+
     return res.json(stats);
   } catch (error) {
     console.error('Error in getUserStats controller:', error.message);
+    return res.status(500).json({ message: error.message });
+  }
+};
+
+// ── @desc   Update user weekly goal days
+// ── @route  PUT /api/stats/weekly-goal
+// ── @access Private
+const updateWeeklyGoal = async (req, res) => {
+  try {
+    const { weeklyGoalDays } = req.body;
+    const goal = Number(weeklyGoalDays);
+
+    if (isNaN(goal) || goal < 1 || goal > 7) {
+      return res.status(400).json({ message: 'weeklyGoalDays must be a number between 1 and 7' });
+    }
+
+    let stats = await UserStats.findOne({ userId: req.userId });
+    if (!stats) {
+      stats = await UserStats.create({ userId: req.userId });
+    }
+
+    stats.weeklyGoalDays = goal;
+    await stats.save();
+
+    return res.json(stats);
+  } catch (error) {
+    console.error('Error in updateWeeklyGoal controller:', error.message);
     return res.status(500).json({ message: error.message });
   }
 };
@@ -179,6 +214,7 @@ Requirements:
     let parsedData = { patterns: [] };
     try {
       parsedData = JSON.parse(rawContent);
+      parsedData = sanitizeObjectStrings(parsedData);
     } catch (parseErr) {
       console.error('Failed to parse Groq Learning DNA output:', rawContent);
     }
@@ -206,5 +242,6 @@ Requirements:
 
 module.exports = {
   getUserStats,
+  updateWeeklyGoal,
   analyzeLearningDNA,
 };

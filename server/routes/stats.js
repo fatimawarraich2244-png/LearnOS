@@ -2,10 +2,11 @@ const express = require('express');
 const router = express.Router();
 const { protect } = require('../middleware/auth');
 const { aiRateLimiter } = require('../middleware/rateLimiter');
-const { getUserStats, analyzeLearningDNA } = require('../controllers/statsController');
+const { getUserStats, updateWeeklyGoal, analyzeLearningDNA } = require('../controllers/statsController');
 const UserStats = require('../models/UserStats');
 
 router.get('/', protect, getUserStats);
+router.put('/weekly-goal', protect, updateWeeklyGoal);
 router.post('/learning-dna', protect, aiRateLimiter, analyzeLearningDNA);
 router.get('/learning-dna', protect, async (req, res) => {
   try {

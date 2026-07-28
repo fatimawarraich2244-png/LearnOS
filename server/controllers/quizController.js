@@ -1,9 +1,14 @@
+const mongoose = require('mongoose');
 const axios = require('axios');
 const Material = require('../models/Material');
 const Quiz = require('../models/Quiz');
 const Subject = require('../models/Subject');
 const { getEmbeddings } = require('../services/embeddings');
 const { cosineSimilarity } = require('../services/similarity');
+
+// ── Fix 4 (XSS): Strip HTML tags before saving topic to DB.
+// Mirrors sanitizeName() already used in semester/subject/exam controllers.
+const sanitizeName = (str) => (str ? str.replace(/<[^>]*>/g, '').trim() : '');
 
 // ── @desc   Generate multiple choice quiz questions for a subject
 // ── @route  POST /api/quiz/generate
@@ -248,18 +253,43 @@ JSON structure required:
 // ── @access Private
 const submitQuiz = async (req, res) => {
   try {
-    const { subjectId, questions, userAnswers, difficulty = 'medium', examMode = false, timeTakenSeconds = 0, topic = '' } = req.body;
+    const rawUserAnswers = req.body.userAnswers || req.body.answers || [];
+    const { subjectId, questions, difficulty = 'medium', examMode = false, timeTakenSeconds = 0, topic = '' } = req.body;
 
-    if (!subjectId || !questions || !Array.isArray(questions) || !userAnswers || !Array.isArray(userAnswers)) {
-      return res.status(400).json({ message: 'subjectId, questions, and userAnswers are required' });
+    console.log('[DEBUG Handoff 2 Controller submitQuiz Received]', {
+      userId: req.userId,
+      subjectId,
+      questionsCount: questions?.length,
+      userAnswersCount: rawUserAnswers?.length,
+      rawUserAnswers,
+    });
+
+    if (!subjectId || !questions || !Array.isArray(questions) || !Array.isArray(rawUserAnswers)) {
+      return res.status(400).json({ message: 'subjectId, questions, and userAnswers (or answers) are required array fields' });
+    }
+
+    // Fix 1 (Q2b): reject non-ObjectId subjectId with a clean 400 instead of a raw Mongoose 500
+    if (!mongoose.Types.ObjectId.isValid(subjectId)) {
+      return res.status(400).json({ message: 'Invalid subjectId format' });
+    }
+
+    // Fix 2 (Q2c): confirm the subject exists and belongs to this user
+    const subject = await Subject.findOne({ _id: subjectId, userId: req.userId });
+    if (!subject) {
+      return res.status(404).json({ message: 'Subject not found or does not belong to you' });
+    }
+
+    // Fix 3 (Q3b): reject empty quiz submissions — at least one question is required
+    if (questions.length === 0) {
+      return res.status(400).json({ message: 'Quiz must contain at least one question.' });
     }
 
     let correctCount = 0;
     const totalQuestions = questions.length;
 
     const results = questions.map((q, index) => {
-      const userAnswer = userAnswers[index] || '';
-      const isCorrect = userAnswer === q.correctAnswer;
+      const userAnswer = rawUserAnswers[index] || '';
+      const isCorrect = userAnswer.trim().toLowerCase() === String(q.correctAnswer || '').trim().toLowerCase();
       if (isCorrect) {
         correctCount += 1;
       }
@@ -274,20 +304,38 @@ const submitQuiz = async (req, res) => {
 
     const score = totalQuestions > 0 ? Math.round((correctCount / totalQuestions) * 100) : 0;
 
+    const questionsToSave = questions.map((q, index) => ({
+      question: q.question,
+      options: q.options || [],
+      correctAnswer: q.correctAnswer,
+      userAnswer: rawUserAnswers[index] || '',
+      explanation: q.explanation || '',
+    }));
+
+    console.log('[DEBUG Handoff 3 Controller Saving to DB]', {
+      score,
+      correctCount,
+      totalQuestions,
+      questionsToSave,
+    });
+
     const newQuiz = await Quiz.create({
       subjectId,
       userId: req.userId,
-      questions,
+      questions: questionsToSave,
       score,
       difficulty,
       examMode: Boolean(examMode),
       timeTakenSeconds: Number(timeTakenSeconds) || 0,
-      topic: topic || '',
+      // Fix 4 (Q4): sanitize topic before saving — strips any HTML/script tags
+      topic: sanitizeName(topic),
     });
 
-    const subject = await Subject.findById(subjectId);
-    if (subject) {
-      const topicName = subject.name;
+    // subject was already fetched above for the ownership check — reuse it
+    const subjectForTopics = subject;
+
+    if (subjectForTopics) {
+      const topicName = subjectForTopics.name;
       if (score < 50) {
         await Subject.findByIdAndUpdate(subjectId, {
           $addToSet: { weakTopics: topicName },
@@ -302,10 +350,11 @@ const submitQuiz = async (req, res) => {
     }
 
     // Gamification Integration
-    const { addXP, updateStreak, checkAndAwardBadges } = require('../services/gamification');
+    const { addXP, updateStreak, updateWeeklyProgress, checkAndAwardBadges } = require('../services/gamification');
     const xpAmount = score >= 80 ? 50 : 20;
     const xpResult = await addXP(req.userId, xpAmount);
     const streakResult = await updateStreak(req.userId);
+    await updateWeeklyProgress(req.userId);
 
     const quizzesTaken = await Quiz.countDocuments({ userId: req.userId });
     const newBadges = await checkAndAwardBadges(req.userId, {
@@ -313,6 +362,12 @@ const submitQuiz = async (req, res) => {
       score,
       currentStreak: streakResult.currentStreak,
     });
+
+    const { createNotificationHelper } = require('./notificationController');
+    const notifType = examMode ? 'exam' : 'quiz';
+    const notifTitle = examMode ? '📝 Timed Exam Completed' : '📊 Practice Quiz Completed';
+    const notifMsg = `You scored ${score}% (${correctCount}/${totalQuestions} correct) and earned +${xpAmount} XP!`;
+    await createNotificationHelper(req.userId, notifType, notifTitle, notifMsg);
 
     return res.json({
       score,
@@ -345,6 +400,12 @@ const getQuizHistory = async (req, res) => {
       userId: req.userId,
     }).sort({ takenAt: -1, createdAt: -1 });
 
+    console.log('[DEBUG Handoff 4 Controller getQuizHistory Read]', history.map((q) => ({
+      quizId: q._id,
+      score: q.score,
+      questions: q.questions.map((item) => ({ q: item.question, userAns: item.userAnswer, correctAns: item.correctAnswer })),
+    })));
+
     return res.json(history);
   } catch (error) {
     console.error('Error in getQuizHistory:', error.message);
@@ -352,4 +413,26 @@ const getQuizHistory = async (req, res) => {
   }
 };
 
-module.exports = { generateQuiz, generateExam, submitQuiz, getQuizHistory };
+// ── @desc   Get all quiz attempt history across ALL subjects for user
+// ── @route  GET /api/quiz/history-all
+// ── @access Private
+const getAllQuizHistory = async (req, res) => {
+  try {
+    const history = await Quiz.find({ userId: req.userId })
+      .populate('subjectId', 'name')
+      .sort({ takenAt: -1, createdAt: -1 });
+
+    console.log('[DEBUG Handoff 4 Controller getAllQuizHistory Read]', history.map((q) => ({
+      quizId: q._id,
+      score: q.score,
+      questions: q.questions.map((item) => ({ q: item.question, userAns: item.userAnswer, correctAns: item.correctAnswer })),
+    })));
+
+    return res.json(history);
+  } catch (error) {
+    console.error('Error in getAllQuizHistory:', error.message);
+    return res.status(500).json({ message: `Error fetching all quiz history: ${error.message}` });
+  }
+};
+
+module.exports = { generateQuiz, generateExam, submitQuiz, getQuizHistory, getAllQuizHistory };

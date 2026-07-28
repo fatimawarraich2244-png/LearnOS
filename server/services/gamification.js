@@ -115,6 +115,20 @@ const checkAndAwardBadges = async (userId, context = {}) => {
     if (newlyEarned.length > 0) {
       stats.badges = Array.from(new Set([...existingBadges, ...newlyEarned]));
       await stats.save();
+
+      const { createNotificationHelper } = require('../controllers/notificationController');
+      const badgeNamesMap = {
+        first_quiz: 'First Steps',
+        quiz_master: 'Quiz Master',
+        week_streak: 'Week Warrior',
+        knowledge_seeker: 'Knowledge Seeker',
+        perfect_score: 'Perfectionist',
+        night_owl: 'Night Owl',
+      };
+      for (const bId of newlyEarned) {
+        const name = badgeNamesMap[bId] || bId;
+        await createNotificationHelper(userId, 'badge', '🏆 Badge Unlocked!', `Congratulations! You unlocked the "${name}" badge.`);
+      }
     }
 
     return newlyEarned;
@@ -124,8 +138,59 @@ const checkAndAwardBadges = async (userId, context = {}) => {
   }
 };
 
+/**
+ * Helper to calculate the date of the most recent Monday (00:00:00).
+ */
+const getMostRecentMonday = (d = new Date()) => {
+  const date = new Date(d);
+  const day = date.getDay();
+  const diff = date.getDate() - day + (day === 0 ? -6 : 1);
+  const monday = new Date(date.setDate(diff));
+  monday.setHours(0, 0, 0, 0);
+  return monday;
+};
+
+/**
+ * Updates user weekly study progress.
+ */
+const updateWeeklyProgress = async (userId) => {
+  try {
+    let stats = await UserStats.findOne({ userId });
+    if (!stats) {
+      stats = await UserStats.create({ userId });
+    }
+
+    const now = new Date();
+    const currentMonday = getMostRecentMonday(now);
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const dayStr = String(now.getDate()).padStart(2, '0');
+    const todayStr = `${year}-${month}-${dayStr}`;
+
+    // Reset if new week
+    if (!stats.weekStartDate || new Date(stats.weekStartDate).getTime() < currentMonday.getTime()) {
+      stats.weekStartDate = currentMonday;
+      stats.daysStudiedThisWeek = [todayStr];
+    } else {
+      if (!stats.daysStudiedThisWeek.includes(todayStr)) {
+        stats.daysStudiedThisWeek.push(todayStr);
+      }
+    }
+
+    await stats.save();
+    return {
+      weeklyGoalDays: stats.weeklyGoalDays || 5,
+      daysStudiedThisWeek: stats.daysStudiedThisWeek,
+    };
+  } catch (error) {
+    console.error('Error in updateWeeklyProgress service:', error.message);
+    return { weeklyGoalDays: 5, daysStudiedThisWeek: [] };
+  }
+};
+
 module.exports = {
   addXP,
   updateStreak,
+  updateWeeklyProgress,
   checkAndAwardBadges,
 };

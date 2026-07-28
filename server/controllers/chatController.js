@@ -4,6 +4,18 @@ const ChatMessage = require('../models/ChatMessage');
 const { getEmbeddings } = require('../services/embeddings');
 const { cosineSimilarity } = require('../services/similarity');
 
+/**
+ * Returns true when the error is a transient network/DNS failure talking to
+ * an external API (Voyage AI, Groq, etc.) rather than a logic error.
+ */
+const isNetworkError = (err) => {
+  const networkCodes = ['EAI_AGAIN', 'ENOTFOUND', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT'];
+  return networkCodes.includes(err.code);
+};
+
+const NETWORK_ERROR_MSG =
+  'Unable to reach the AI service right now — please check your internet connection and try again.';
+
 const sendSSEFallback = async (res, subjectId, userId, fallbackAns) => {
   await ChatMessage.create({
     subjectId,
@@ -168,7 +180,14 @@ const askQuestion = async (req, res) => {
       return sendSSEFallback(res, subjectId, req.userId, fallbackAns);
     }
 
-    const questionEmbeddings = await getEmbeddings([question]);
+    let questionEmbeddings;
+    try {
+      questionEmbeddings = await getEmbeddings([question]);
+    } catch (embErr) {
+      const msg = isNetworkError(embErr) ? NETWORK_ERROR_MSG : `Failed to generate embedding: ${embErr.message}`;
+      console.error('[askQuestion] Embedding error:', embErr.code || embErr.message);
+      return sendSSEFallback(res, subjectId, req.userId, msg);
+    }
     const questionVector = questionEmbeddings[0];
 
     if (!questionVector) {
@@ -251,7 +270,14 @@ const detectConfusion = async (req, res) => {
       return sendSSEFallback(res, subjectId, req.userId, fallbackAns);
     }
 
-    const confusedEmbeddings = await getEmbeddings([confusedTopic]);
+    let confusedEmbeddings;
+    try {
+      confusedEmbeddings = await getEmbeddings([confusedTopic]);
+    } catch (embErr) {
+      const msg = isNetworkError(embErr) ? NETWORK_ERROR_MSG : `Failed to generate embedding: ${embErr.message}`;
+      console.error('[detectConfusion] Embedding error:', embErr.code || embErr.message);
+      return sendSSEFallback(res, subjectId, req.userId, msg);
+    }
     const confusedVector = confusedEmbeddings[0];
 
     if (!confusedVector) {
@@ -339,7 +365,14 @@ const explainAtLevel = async (req, res) => {
       return sendSSEFallback(res, subjectId, req.userId, fallbackAns);
     }
 
-    const topicEmbeddings = await getEmbeddings([topic]);
+    let topicEmbeddings;
+    try {
+      topicEmbeddings = await getEmbeddings([topic]);
+    } catch (embErr) {
+      const msg = isNetworkError(embErr) ? NETWORK_ERROR_MSG : `Failed to generate embedding: ${embErr.message}`;
+      console.error('[explainAtLevel] Embedding error:', embErr.code || embErr.message);
+      return sendSSEFallback(res, subjectId, req.userId, msg);
+    }
     const topicVector = topicEmbeddings[0];
 
     if (!topicVector) {
@@ -420,7 +453,14 @@ const feynmanFeedback = async (req, res) => {
       return sendSSEFallback(res, subjectId, req.userId, fallbackAns);
     }
 
-    const topicEmbeddings = await getEmbeddings([topic]);
+    let topicEmbeddings;
+    try {
+      topicEmbeddings = await getEmbeddings([topic]);
+    } catch (embErr) {
+      const msg = isNetworkError(embErr) ? NETWORK_ERROR_MSG : `Failed to generate embedding: ${embErr.message}`;
+      console.error('[feynmanFeedback] Embedding error:', embErr.code || embErr.message);
+      return sendSSEFallback(res, subjectId, req.userId, msg);
+    }
     const topicVector = topicEmbeddings[0];
 
     if (!topicVector) {

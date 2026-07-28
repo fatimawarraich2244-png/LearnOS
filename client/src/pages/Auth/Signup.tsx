@@ -31,34 +31,39 @@ const Signup: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-bg font-inter flex items-center justify-center px-4 py-12">
-      {/* Ambient glow */}
-      <div className="absolute top-1/3 left-1/2 -translate-x-1/2 w-[500px] h-[500px] bg-accent-teal/5 rounded-full blur-3xl pointer-events-none" />
+    <div className="min-h-screen bg-[#F0F4F7] font-sans flex flex-col items-center justify-center p-6 text-[#1E3A4A]">
+      <div className="max-w-md w-full flex flex-col gap-6">
 
-      <div className="max-w-md w-full z-10">
         {/* Logo above card */}
-        <div className="flex flex-col items-center mb-8 gap-3">
-          <img src={logo} alt="LearnOS" className="h-14 w-auto" />
-          <span className="font-jakarta font-bold text-2xl text-accent-teal tracking-wide">LearnOS</span>
+        <div className="flex flex-col items-center gap-2">
+          <div className="w-12 h-12 rounded-xl bg-[#1E3A4A] border border-[#152B37] flex items-center justify-center p-2">
+            <img src={logo} alt="LearnOS" className="w-full h-full object-contain" />
+          </div>
+          <span className="font-sans font-semibold text-lg text-[#1E3A4A] tracking-tight">
+            LearnOS
+          </span>
         </div>
 
-        <div className="bg-surface border border-border rounded-2xl p-8 shadow-2xl">
-          <div className="mb-8 text-center">
-            <h1 className="font-jakarta font-bold text-2xl text-text-primary mb-1">
+        {/* White Centered Card */}
+        <div className="bg-white rounded-2xl p-8 border border-[#E5E7EB] flex flex-col gap-6">
+          <div className="text-center">
+            <h1 className="font-sans font-semibold text-lg text-[#1E3A4A]">
               Create your account
             </h1>
-            <p className="text-text-secondary text-sm">Start your learning journey with LearnOS</p>
+            <p className="text-xs text-[#6B7B85] mt-0.5 font-normal">
+              Start your learning journey with LearnOS
+            </p>
           </div>
 
           {error && (
-            <div className="mb-5 bg-red-500/10 border border-red-500/20 text-red-400 px-4 py-3 rounded-xl text-sm text-center">
+            <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs text-center font-medium">
               {error}
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
             <div>
-              <label htmlFor="full-name" className="block text-sm font-medium text-text-secondary mb-1.5">
+              <label htmlFor="full-name" className="block text-xs font-semibold uppercase tracking-wide text-[#6B7B85] mb-1">
                 Full Name
               </label>
               <input
@@ -69,12 +74,12 @@ const Signup: React.FC = () => {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="John Doe"
-                className="w-full px-4 py-3 bg-surface2 border border-border text-text-primary placeholder-text-muted rounded-xl text-sm focus:outline-none focus:border-accent-teal transition-colors"
+                className="w-full px-3 py-2 rounded-lg border border-[#E5E7EB] text-xs font-medium text-[#1E3A4A] bg-white placeholder-[#6B7B85]/60 focus:outline-none focus:border-[#2E7C87]"
               />
             </div>
 
             <div>
-              <label htmlFor="email" className="block text-sm font-medium text-text-secondary mb-1.5">
+              <label htmlFor="email" className="block text-xs font-semibold uppercase tracking-wide text-[#6B7B85] mb-1">
                 Email address
               </label>
               <input
@@ -85,12 +90,12 @@ const Signup: React.FC = () => {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
-                className="w-full px-4 py-3 bg-surface2 border border-border text-text-primary placeholder-text-muted rounded-xl text-sm focus:outline-none focus:border-accent-teal transition-colors"
+                className="w-full px-3 py-2 rounded-lg border border-[#E5E7EB] text-xs font-medium text-[#1E3A4A] bg-white placeholder-[#6B7B85]/60 focus:outline-none focus:border-[#2E7C87]"
               />
             </div>
 
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-text-secondary mb-1.5">
+              <label htmlFor="password" className="block text-xs font-semibold uppercase tracking-wide text-[#6B7B85] mb-1">
                 Password
               </label>
               <input
@@ -101,22 +106,19 @@ const Signup: React.FC = () => {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
-                className="w-full px-4 py-3 bg-surface2 border border-border text-text-primary placeholder-text-muted rounded-xl text-sm focus:outline-none focus:border-accent-teal transition-colors"
+                className="w-full px-3 py-2 rounded-lg border border-[#E5E7EB] text-xs font-medium text-[#1E3A4A] bg-white placeholder-[#6B7B85]/60 focus:outline-none focus:border-[#2E7C87]"
               />
             </div>
 
             <button
               type="submit"
               disabled={loading}
-              className="mt-2 w-full py-3 bg-accent-teal text-bg font-jakarta font-semibold rounded-xl hover:bg-[#8ec8d0] transition-colors duration-150 disabled:opacity-50 flex items-center justify-center gap-2"
+              className="mt-2 w-full py-2.5 rounded-lg text-xs font-semibold text-white bg-[#2E7C87] hover:bg-[#256770] disabled:opacity-50 transition-colors flex items-center justify-center gap-2 cursor-pointer"
             >
               {loading ? (
                 <>
-                  <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                  </svg>
-                  Creating account...
+                  <div className="animate-spin h-3.5 w-3.5 border-2 border-white border-t-transparent rounded-full" />
+                  <span>Creating account...</span>
                 </>
               ) : (
                 'Create Account'
@@ -124,9 +126,9 @@ const Signup: React.FC = () => {
             </button>
           </form>
 
-          <p className="mt-6 text-center text-sm text-text-secondary">
+          <p className="text-center text-xs text-[#6B7B85] font-normal">
             Already have an account?{' '}
-            <Link to="/login" className="text-accent-teal font-medium hover:underline">
+            <Link to="/login" className="text-[#2E7C87] font-medium hover:underline no-underline">
               Sign in
             </Link>
           </p>

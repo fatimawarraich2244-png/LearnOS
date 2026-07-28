@@ -5,10 +5,12 @@ const {
   getSemesters,
   createSemester,
   deleteSemester,
+  updateSemester,
 } = require('../controllers/semesterController');
 
 router.get('/', protect, getSemesters);
 router.post('/', protect, createSemester);
+router.put('/:id', protect, updateSemester);
 router.delete('/:id', protect, deleteSemester);
 
 module.exports = router;

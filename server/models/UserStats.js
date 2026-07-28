@@ -32,6 +32,18 @@ const userStatsSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
+    weeklyGoalDays: {
+      type: Number,
+      default: 5,
+    },
+    weekStartDate: {
+      type: Date,
+      default: null,
+    },
+    daysStudiedThisWeek: {
+      type: [String],
+      default: [],
+    },
     learningDNA: {
       type: Object,
       default: null,

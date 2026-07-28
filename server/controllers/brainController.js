@@ -2,6 +2,7 @@ const axios = require('axios');
 const GlobalBrain = require('../models/GlobalBrain');
 const Subject = require('../models/Subject');
 const Quiz = require('../models/Quiz');
+const { sanitizeObjectStrings } = require('../utils/sanitize');
 
 // ── @desc   Analyze cross-subject knowledge and update GlobalBrain
 // ── @route  POST /api/brain/update
@@ -113,6 +114,7 @@ JSON structure:
     let parsed;
     try {
       parsed = JSON.parse(rawContent);
+      parsed = sanitizeObjectStrings(parsed);
     } catch (parseErr) {
       console.error('Failed to parse GlobalBrain Groq JSON:', rawContent);
       return res.status(500).json({

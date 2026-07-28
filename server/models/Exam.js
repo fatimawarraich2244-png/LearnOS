@@ -15,6 +15,7 @@ const examSchema = new mongoose.Schema(
     name: {
       type: String,
       required: true,
+      trim: true,
     },
     examDate: {
       type: Date,
@@ -23,5 +24,9 @@ const examSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+// Index to speed up the duplicate day-window findOne lookup in createExam.
+// Not unique: true because the same exam name is valid on different dates.
+examSchema.index({ subjectId: 1, examDate: 1 });
 
 module.exports = mongoose.model('Exam', examSchema);

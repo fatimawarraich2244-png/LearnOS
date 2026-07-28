@@ -14,13 +14,19 @@ const {
   getRecentActivity,
   getAllUserSubjects,
   getFullReport,
+  getCalendarEvents,
+  globalSearch,
+  getAllSubjects,
 } = require('../controllers/subjectController');
 
 // ── Fixed / specific routes MUST come before parameterized routes (e.g. /:semesterId)
+router.get('/search', protect, globalSearch);
+router.get('/all', protect, getAllSubjects);
 router.get('/stats/overview', protect, getDashboardStats);
 router.get('/activity/recent', protect, getRecentActivity);
 router.get('/user/all', protect, getAllUserSubjects);
 router.get('/report/full', protect, getFullReport);
+router.get('/calendar-events', protect, getCalendarEvents);
 router.get('/single/:id', protect, getSubjectById);
 router.get('/:semesterId', protect, getSubjects);
 router.post('/', protect, createSubject);
