@@ -20,10 +20,6 @@ const materialSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
-    filePath: {
-      type: String,
-      required: true,
-    },
     chunks: {
       type: [String],
       default: [],

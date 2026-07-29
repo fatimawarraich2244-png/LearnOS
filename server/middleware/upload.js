@@ -1,19 +1,4 @@
 const multer = require('multer');
-const fs = require('fs');
-
-const uploadDir = './uploads/';
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
-
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, uploadDir);
-  },
-  filename: function (req, file, cb) {
-    cb(null, Date.now() + '-' + file.originalname);
-  }
-});
 
 const fileFilter = (req, file, cb) => {
   const allowedMimeTypes = [
@@ -30,7 +15,7 @@ const fileFilter = (req, file, cb) => {
 };
 
 const upload = multer({
-  storage: storage,
+  storage: multer.memoryStorage(), // Files held in RAM buffer — never written to disk
   limits: {
     fileSize: 25 * 1024 * 1024 // 25MB
   },

@@ -1,20 +1,19 @@
-const fs = require('fs');
 const pdfModule = require('pdf-parse');
 const mammoth = require('mammoth');
 
-const parsePDF = async (filePath) => {
+// Both functions now accept a Buffer directly — no disk I/O needed
+const parsePDF = async (buffer) => {
   try {
-    const dataBuffer = fs.readFileSync(filePath);
     if (typeof pdfModule === 'function') {
-      const data = await pdfModule(dataBuffer);
+      const data = await pdfModule(buffer);
       return data.text || '';
     }
     if (pdfModule && typeof pdfModule.default === 'function') {
-      const data = await pdfModule.default(dataBuffer);
+      const data = await pdfModule.default(buffer);
       return data.text || '';
     }
     if (pdfModule && typeof pdfModule.PDFParse === 'function') {
-      const parser = new pdfModule.PDFParse({ data: dataBuffer });
+      const parser = new pdfModule.PDFParse({ data: buffer });
       const data = await parser.getText();
       return data.text || '';
     }
@@ -24,9 +23,9 @@ const parsePDF = async (filePath) => {
   }
 };
 
-const parseDOCX = async (filePath) => {
+const parseDOCX = async (buffer) => {
   try {
-    const result = await mammoth.extractRawText({ path: filePath });
+    const result = await mammoth.extractRawText({ buffer });
     return result.value || '';
   } catch (error) {
     throw new Error(`Failed to parse DOCX: ${error.message}`);
