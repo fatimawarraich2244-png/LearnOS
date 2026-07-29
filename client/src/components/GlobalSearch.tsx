@@ -11,9 +11,6 @@ export interface SearchResultItem {
   link: string;
 }
 
-const cardGradientStyle = {
-  background: 'radial-gradient(120% 120% at 50% 10%, #132D28 0%, #0F2420 100%)',
-};
 
 export const GlobalSearch: React.FC<{ placeholder?: string; className?: string }> = ({
   placeholder = 'Search subjects, materials, chats...',
