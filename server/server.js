@@ -17,7 +17,8 @@ const app = express();
 
 // ── Middleware ────────────────────────────────────────────────────────────────
 const allowedOrigins = [
-  process.env.CLIENT_URL,                "https://learn-os-rho.vercel.app",
+  process.env.CLIENT_URL,                // production
+  'https://learn-os-rho.vercel.app',     // production (hardcoded fallback)
   'http://localhost:5173',               // local dev
   'http://localhost:3000',               // alternate local dev
 ];

@@ -7,6 +7,7 @@ import confetti from 'canvas-confetti';
 import toast from 'react-hot-toast';
 import jsPDF from 'jspdf';
 import { sanitizeTextForPDF } from '../../utils/pdfSanitizer';
+import ReactMarkdown from 'react-markdown';
 import {
   Clock,
   Play,
@@ -1592,7 +1593,13 @@ const StudySubject: React.FC = () => {
                               : 'bg-white text-[#1E3A4A] border border-[#E5E7EB] rounded-bl-none shadow-xs'
                           }`}
                         >
-                          {msg.content || (chatLoading && i === messages.length - 1 ? 'Thinking...' : '')}
+                          {msg.role === 'assistant' && msg.content ? (
+                            <div className="chat-markdown">
+                              <ReactMarkdown>{msg.content}</ReactMarkdown>
+                            </div>
+                          ) : (
+                            msg.content || (chatLoading && i === messages.length - 1 ? 'Thinking...' : '')
+                          )}
                         </div>
 
                         {/* Read Feedback Aloud Button using SpeechSynthesis */}

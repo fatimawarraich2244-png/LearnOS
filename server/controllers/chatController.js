@@ -203,7 +203,7 @@ const askQuestion = async (req, res) => {
     const topChunks = scoredChunks.slice(0, 5).map(sc => sc.chunk);
 
     const contextText = topChunks.join('\n\n');
-    const systemPrompt = `You are a helpful study assistant. Answer the student's question using ONLY the context provided below. If the answer isn't in the context, say so clearly. Context: \n${contextText}`;
+    const systemPrompt = `You are a helpful study assistant. Answer the student's question using ONLY the context provided below. If the answer isn't in the context, say so clearly.\n\nFormat your response using markdown for readability:\n- Use **bold** for key terms and important concepts\n- Use headings (## or ###) to organize sections\n- Use bullet points or numbered lists for steps or multiple points\n- Use code blocks for any code or formulas\n- Keep paragraphs concise and well-spaced\n\nContext:\n${contextText}`;
 
     const { addXP } = require('../services/gamification');
 
