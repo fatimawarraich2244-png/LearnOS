@@ -16,11 +16,26 @@ connectDB();
 const app = express();
 
 // ── Middleware ────────────────────────────────────────────────────────────────
+const allowedOrigins = [
+  process.env.CLIENT_URL,                "https://learn-os-rho.vercel.app",
+  'http://localhost:5173',               // local dev
+  'http://localhost:3000',               // alternate local dev
+];
+
 app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:5173',
+  origin: function (origin, callback) {
+    // Allow requests with no origin (e.g. Postman, server-to-server)
+    if (!origin) return callback(null, true);
+    // Allow exact matches
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    // Allow Vercel preview deployments
+    if (origin.endsWith('.vercel.app')) return callback(null, true);
+    callback(new Error('Not allowed by CORS'));
+  },
   credentials: true,
 }));
 app.use(express.json());
+
 
 
 // ── Routes ────────────────────────────────────────────────────────────────────
